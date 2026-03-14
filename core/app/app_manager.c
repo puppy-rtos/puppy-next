@@ -1,0 +1,399 @@
+#include "app_manager.h"
+#include "app_loader.h"
+#include "libcm.h"
+#include "puppy_log.h"
+#include "mpu.h"
+#include "pup_romfs.h"
+#include "kheap.h"
+#include <puppy_core.h>
+#include <string.h>
+#include <stdio.h>
+
+static app_process_t* g_app_list = NULL;
+static int next_pid = 1;
+app_process_t* current_app_process = NULL;
+
+static int app_exec_internal(const char* name, const char* path, const char* arg, int wait);
+
+int app_manager_init(void) {
+    g_app_list = NULL;
+    next_pid = 1;
+    current_app_process = NULL;
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App manager initialized (dynamic process table)");
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App memory uses dynamic user heap (aligned=%u)", APP_MEMORY_ALIGN);
+    
+    return 0;
+}
+
+int app_alloc_memory(const char* name, unsigned int flash_addr, unsigned int flash_size, unsigned int memory_size) {
+    app_process_t* app;
+    void* mem;
+    size_t free_bytes;
+    
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Allocating memory for app '%s'", name);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Flash addr: 0x%08x, size: %d", flash_addr, flash_size);
+    
+    if (memory_size == 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid app memory size: %u", memory_size);
+        return -1;
+    }
+
+    free_bytes = kheap_user_free_size();
+    if (memory_size > free_bytes) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Not enough user heap: need=%u free=%u",
+                      memory_size, (unsigned int)free_bytes);
+        return -1;
+    }
+
+    app = (app_process_t*)kheap_calloc(1, sizeof(app_process_t));
+    if (!app) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to allocate app process node");
+        return -1;
+    }
+    
+    mem = kheap_user_memalign(APP_MEMORY_ALIGN, memory_size);
+    if (!mem) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "No dynamic app memory available (%u bytes)", memory_size);
+        kheap_free(app);
+        return -1;
+    }
+    
+    app->pid = next_pid++;
+    app->state = APP_STATE_LOADING;
+    
+    strncpy(app->name, name, APP_NAME_MAX_LEN - 1);
+    app->name[APP_NAME_MAX_LEN - 1] = '\0';
+    
+    app->memory_base = (unsigned int)mem;
+    app->memory_size = memory_size;
+    app->stack_base = (memory_size >= APP_STACK_SIZE)
+        ? (app->memory_base + memory_size - APP_STACK_SIZE)
+        : app->memory_base;
+    app->stack_size = APP_STACK_SIZE;
+    app->flash_addr = flash_addr;
+    app->flash_size = flash_size;
+    app->exit_code = 0;
+    app->thread = PUP_NULL;
+    app->next = g_app_list;
+    g_app_list = app;
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Allocated app '%s' (pid=%d)", name, app->pid);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Memory: 0x%08x - 0x%08x", 
+                  app->memory_base, app->memory_base + app->memory_size);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack: 0x%08x (%d bytes)", 
+                  app->stack_base, app->stack_size);
+    
+    return app->pid;
+}
+
+void app_free_memory(int pid) {
+    app_process_t* app = g_app_list;
+    app_process_t* prev = NULL;
+    
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Freeing memory for pid=%d", pid);
+    
+    while (app) {
+        if (app->pid == pid) {
+            break;
+        }
+        prev = app;
+        app = app->next;
+    }
+    
+    if (!app) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App not found: pid=%d", pid);
+        return;
+    }
+    
+    if (app->memory_base != 0) {
+        kheap_user_free((void*)app->memory_base);
+    }
+
+    if (prev) {
+        prev->next = app->next;
+    } else {
+        g_app_list = app->next;
+    }
+
+    if (current_app_process == app) {
+        current_app_process = NULL;
+    }
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Freed app '%s' (pid=%d)", 
+                 app->name, pid);
+
+    kheap_free(app);
+}
+
+int app_find_by_name(const char* name) {
+    app_process_t* app = g_app_list;
+
+    while (app) {
+        if (strcmp(app->name, name) == 0) {
+            return app->pid;
+        }
+        app = app->next;
+    }
+    
+    return -1;
+}
+
+app_process_t* app_get_by_pid(int pid) {
+    app_process_t* app = g_app_list;
+
+    while (app) {
+        if (app->pid == pid) {
+            return app;
+        }
+        app = app->next;
+    }
+    
+    return NULL;
+}
+
+app_process_t* app_get_current(void) {
+    return app_find_by_thread(pthread_self());
+}
+
+app_process_t* app_find_by_thread(pthread_t thread) {
+    void* stackaddr;
+    pup_size_t stacksize;
+    unsigned int stack_start;
+    unsigned int stack_end;
+
+    if (!thread) {
+        return NULL;
+    }
+
+    stackaddr = pup_thread_get_stackaddr(thread);
+    stacksize = pup_thread_get_stacksize(thread);
+    stack_start = (unsigned int)stackaddr;
+    stack_end = stack_start + stacksize;
+
+    app_process_t* app = g_app_list;
+
+    while (app) {
+        unsigned int app_start;
+        unsigned int app_end;
+
+        if (app->thread == thread) {
+            return app;
+        }
+
+        app_start = app->memory_base;
+        app_end = app_start + app->memory_size;
+
+        if ((stack_start >= app_start && stack_start < app_end) ||
+            (stack_end > app_start && stack_end <= app_end)) {
+            return app;
+        }
+
+        app = app->next;
+    }
+
+    return NULL;
+}
+
+int app_set_state(int pid, int state) {
+    app_process_t* app = app_get_by_pid(pid);
+    
+    if (!app) {
+        return -1;
+    }
+    
+    app->state = state;
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App '%s' (pid=%d) state changed to %d", 
+                  app->name, pid, state);
+    return 0;
+}
+
+int app_get_state(int pid) {
+    app_process_t* app = app_get_by_pid(pid);
+    
+    if (!app) {
+        return -1;
+    }
+    
+    return app->state;
+}
+
+void app_list(void) {
+    int count = 0;
+    app_process_t* app = g_app_list;
+    
+    PUP_PRINTK("\nPID  State    Name             Memory               Size\n");
+    PUP_PRINTK("---- -------- ---------------- -------------------- ------\n");
+    
+    while (app) {
+        const char* state_str;
+        
+        switch (app->state) {
+            case APP_STATE_IDLE:    state_str = "IDLE"; break;
+            case APP_STATE_LOADING: state_str = "LOADING"; break;
+            case APP_STATE_RUNNING: state_str = "RUNNING"; break;
+            case APP_STATE_EXITED:  state_str = "EXITED"; break;
+            default:                state_str = "UNKNOWN"; break;
+        }
+
+        PUP_PRINTK("%-4d %-8s %-16.16s 0x%08x-0x%08x %6u\n",
+                   app->pid, state_str, app->name,
+                   app->memory_base,
+                   app->memory_base + app->memory_size,
+                   app->memory_size);
+        count++;
+        app = app->next;
+    }
+    
+    if (count == 0) {
+        PUP_PRINTK("No running apps\n");
+    }
+}
+
+int app_exec(const char* name, const char* path, int wait) {
+    return app_exec_internal(name, path, NULL, wait);
+}
+
+int app_exec_with_arg(const char* name, const char* path, const char* arg, int wait) {
+    return app_exec_internal(name, path, arg, wait);
+}
+
+static int app_exec_internal(const char* name, const char* path, const char* arg, int wait) {
+    void* file_data = NULL;
+    unsigned int file_size = 0;
+    unsigned int app_mem_size = 0;
+    int pid;
+    int exit_code;
+    app_process_t* app;
+    
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "app_exec: name=%s, path=%s, wait=%d", name, path, wait);
+    
+    if (pup_romfs_get_file_data(path, &file_data, &file_size) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App not found: %s", path);
+        return -1;
+    }
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Loading app '%s' from %s (%d bytes)", name, path, file_size);
+
+    if (app_calc_memory_requirement(file_data, file_size, &app_mem_size) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to calculate app memory requirement: %s", name);
+        return -1;
+    }
+
+    app_mem_size += APP_EXEC_ARG_AREA_SIZE;
+    app_mem_size = (unsigned int)((app_mem_size + (APP_MEMORY_ALIGN - 1)) & ~(APP_MEMORY_ALIGN - 1));
+
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App '%s' memory requirement: %u bytes", name, app_mem_size);
+
+    pid = app_alloc_memory(name, (unsigned int)file_data, file_size, app_mem_size);
+    if (pid < 0) {
+        return -1;
+    }
+
+    app = app_get_by_pid(pid);
+    if (!app) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to resolve pid=%d after allocation", pid);
+        app_free_memory(pid);
+        return -1;
+    }
+
+    if (app_load_into_memory(file_data, file_size,
+                             app->memory_base, app->memory_size,
+                             &app->image) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to load app: %s", name);
+        app_free_memory(pid);
+        return -1;
+    }
+
+    app->image.pid = pid;
+    app->stack_addr = (unsigned int)app->image.stack_addr;
+    app->entry_addr = (unsigned int)app->image.entry;
+    app->got_base = app->image.got_base;
+    app->app_arg_base = app->memory_base + app->memory_size - APP_EXEC_ARG_AREA_SIZE;
+    app->got_start = app->image.got_start;
+    app->got_end = app->image.got_end;
+    app->text_start = app->image.text_start;
+    
+    libcm_memset((void*)app->app_arg_base, 0, APP_EXEC_ARG_AREA_SIZE);
+    if (arg) {
+        libcm_strncpy((char*)app->app_arg_base, arg, APP_EXEC_ARG_AREA_SIZE - 1);
+    }
+    app->image.entry_arg = (void*)app->app_arg_base;
+
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running app '%s'", name);
+
+    if (app_run(&app->image, name, &app->thread) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start app thread: %s", name);
+        app_free_memory(pid);
+        return -1;
+    }
+
+    app->state = APP_STATE_RUNNING;
+    
+    if (!wait) {
+        return pid;
+    }
+
+    exit_code = app_wait(pid);
+    app_free_memory(pid);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App '%s' completed with code %d", name, exit_code);
+    return exit_code;
+}
+
+int app_wait(int pid) {
+    app_process_t* app = app_get_by_pid(pid);
+    int exit_code;
+
+    if (!app) {
+        return -1;
+    }
+
+    while (app->state != APP_STATE_EXITED) {
+        pthread_delay(1);
+
+        app = app_get_by_pid(pid);
+        if (!app) {
+            return -1;
+        }
+    }
+
+    if (app->thread) {
+        pthread_join(app->thread, NULL);
+        app->thread = PUP_NULL;
+    }
+
+    exit_code = app->exit_code;
+
+    pup_reap_zombies();
+
+    return exit_code;
+}
+
+int app_get_process_exit_code(int pid) {
+    app_process_t* app = app_get_by_pid(pid);
+    
+    if (!app) {
+        return -1;
+    }
+    
+    return app->exit_code;
+}
+
+void app_reap_exited(void) {
+    app_process_t* app = g_app_list;
+
+    while (app) {
+        app_process_t* next = app->next;
+
+        if (app->state == APP_STATE_EXITED) {
+            if (app->thread) {
+                pthread_join(app->thread, NULL);
+                app->thread = PUP_NULL;
+            }
+
+            app_free_memory(app->pid);
+        }
+
+        app = next;
+    }
+}

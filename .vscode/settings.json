@@ -1,0 +1,35 @@
+{
+    "files.associations": {
+        "user_libc.h": "c",
+        "user_syscall.h": "c",
+        "mpu.h": "c",
+        "dtm_delay.h": "c"
+    },
+    "MicroPython.executeButton": [
+        {
+            "text": "▶",
+            "tooltip": "运行",
+            "alignment": "left",
+            "command": "extension.executeFile",
+            "priority": 3.5
+        }
+    ],
+    "MicroPython.syncButton": [
+        {
+            "text": "$(sync)",
+            "tooltip": "同步",
+            "alignment": "left",
+            "command": "extension.execute",
+            "priority": 4
+        }
+    ],
+    "MicroPython.splitViewButton": [
+        {
+            "text": "$(split-horizontal)",
+            "tooltip": "打开Python-Blockly分屏视图",
+            "alignment": "left",
+            "command": "extension.openSplitView",
+            "priority": 2.3
+        }
+    ]
+}

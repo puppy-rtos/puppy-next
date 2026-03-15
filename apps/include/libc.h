@@ -1,5 +1,5 @@
-#ifndef __USER_LIBC_H__
-#define __USER_LIBC_H__
+#ifndef __APP_LIBC_H__
+#define __APP_LIBC_H__
 
 #include <stdint.h>
 #include <stddef.h>

@@ -1,12 +1,12 @@
-#ifndef __USER_SYSCALL_H__
-#define __USER_SYSCALL_H__
+#ifndef __APP_SYSCALL_H__
+#define __APP_SYSCALL_H__
 
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
 
-#define USER_FD_STDIN   0
-#define USER_FD_STDOUT  1
-#define USER_FD_STDERR  2
+#define STDIN_FILENO    0
+#define STDOUT_FILENO   1
+#define STDERR_FILENO   2
 
 #define SYS_WRITE   1
 #define SYS_READ    2
@@ -34,110 +34,110 @@
 
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
-static inline long user_write(int fd, const char* buf, long len) {
+static inline long write(int fd, const char* buf, long len) {
     return syscall(SYS_WRITE, fd, (long)buf, len, 0);
 }
 
-static inline long user_read(int fd, char* buf, long len) {
+static inline long read(int fd, char* buf, long len) {
     return syscall(SYS_READ, fd, (long)buf, len, 0);
 }
 
-static inline long user_write_stdout(const char* buf, long len) {
-    return user_write(USER_FD_STDOUT, buf, len);
+static inline long write_stdout(const char* buf, long len) {
+    return write(STDOUT_FILENO, buf, len);
 }
 
-static inline long user_write_stderr(const char* buf, long len) {
-    return user_write(USER_FD_STDERR, buf, len);
+static inline long write_stderr(const char* buf, long len) {
+    return write(STDERR_FILENO, buf, len);
 }
 
-static inline long user_read_stdin(char* buf, long len) {
-    return user_read(USER_FD_STDIN, buf, len);
+static inline long read_stdin(char* buf, long len) {
+    return read(STDIN_FILENO, buf, len);
 }
 
-static inline void user_exit(int code) {
+static inline void exit(int code) {
     syscall(SYS_EXIT, code, 0, 0, 0);
 }
 
-static inline void user_yield(void) {
+static inline void sys_yield(void) {
     syscall(SYS_YIELD, 0, 0, 0, 0);
 }
 
-static inline int user_thread_create(void* (*entry)(void*), void* arg, 
-                                      void* stackaddr, unsigned int stacksize, 
-                                      int priority) {
-    return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)arg, 
+static inline int thread_create(void* (*entry)(void*), void* arg,
+                                void* stackaddr, unsigned int stacksize,
+                                int priority) {
+    return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)arg,
                         (long)stackaddr, (long)((stacksize << 16) | (priority & 0xFFFF)));
 }
 
-static inline int user_thread_join(int thread_id) {
+static inline int thread_join(int thread_id) {
     return (int)syscall(SYS_THREAD_JOIN, thread_id, 0, 0, 0);
 }
 
-static inline int user_open(const char* path, int flags) {
+static inline int open(const char* path, int flags) {
     return (int)syscall(SYS_OPEN, (long)path, flags, 0, 0);
 }
 
-static inline int user_close(int fd) {
+static inline int close(int fd) {
     return (int)syscall(SYS_CLOSE, fd, 0, 0, 0);
 }
 
-static inline int user_ioctl(int fd, int cmd, void* arg) {
+static inline int ioctl(int fd, int cmd, void* arg) {
     return (int)syscall(SYS_IOCTL, fd, cmd, (long)arg, 0);
 }
 
-static inline int user_getdents(int fd, void* dirp, int count) {
+static inline int getdents(int fd, void* dirp, int count) {
     return (int)syscall(SYS_GETDENTS, fd, (long)dirp, count, 0);
 }
 
-static inline int user_ps(void) {
+static inline int ps(void) {
     return (int)syscall(SYS_PS, 0, 0, 0, 0);
 }
 
-static inline int user_execve_with_arg(const char* path, const char* name, const char* arg, int wait) {
+static inline int execve_with_arg(const char* path, const char* name, const char* arg, int wait) {
     return (int)syscall(SYS_EXECVE, (long)path, (long)name, wait, (long)arg);
 }
 
-static inline int user_execve(const char* path, const char* name, int wait) {
-    return user_execve_with_arg(path, name, 0, wait);
+static inline int execve(const char* path, const char* name, int wait) {
+    return execve_with_arg(path, name, 0, wait);
 }
 
-static inline int user_waitpid(int pid, int* status) {
+static inline int waitpid(int pid, int* status) {
     return (int)syscall(SYS_WAITPID, pid, (long)status, 0, 0);
 }
 
-static inline int user_getpid(void) {
+static inline int getpid(void) {
     return (int)syscall(SYS_GETPID, 0, 0, 0, 0);
 }
 
-static inline int user_delay(int ticks) {
+static inline int delay(int ticks) {
     return (int)syscall(SYS_DELAY, ticks, 0, 0, 0);
 }
 
-static inline int user_apps(void) {
+static inline int apps(void) {
     return (int)syscall(SYS_APPS, 0, 0, 0, 0);
 }
 
-static inline unsigned long user_tick_get(void) {
+static inline unsigned long tick_get(void) {
     return (unsigned long)syscall(SYS_TICK_GET, 0, 0, 0, 0);
 }
 
-static inline int user_free(pup_heap_info_t* info) {
+static inline int free_info(pup_heap_info_t* info) {
     return (int)syscall(SYS_FREE, (long)info, 0, 0, 0);
 }
 
-static inline int user_sem_open(const char *name, int flags, unsigned int value) {
+static inline int sem_open(const char *name, int flags, unsigned int value) {
     return (int)syscall(SYS_SEM_OPEN, (long)name, (long)flags, (long)value, 0);
 }
 
-static inline int user_sem_close(int handle) {
+static inline int sem_close(int handle) {
     return (int)syscall(SYS_SEM_CLOSE, (long)handle, 0, 0, 0);
 }
 
-static inline int user_sem_wait(int handle) {
+static inline int sem_wait(int handle) {
     return (int)syscall(SYS_SEM_WAIT, (long)handle, 0, 0, 0);
 }
 
-static inline int user_sem_post(int handle) {
+static inline int sem_post(int handle) {
     return (int)syscall(SYS_SEM_POST, (long)handle, 0, 0, 0);
 }
 

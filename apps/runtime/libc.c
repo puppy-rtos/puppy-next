@@ -1,5 +1,5 @@
-#include "user_libc.h"
-#include "user_syscall.h"
+#include "libc.h"
+#include "syscall.h"
 #include <stdint.h>
 
 #define USER_LIBC_PRINTK_BUF_SIZE 256
@@ -49,9 +49,9 @@ int pthread_create(pthread_t* thread, pthread_attr_t* attr,
     if (!thread || !attr || !start_routine) return -1;
     if (!attr->stackaddr) return -1;
     
-    int tid = user_thread_create(start_routine, arg, 
-                                  attr->stackaddr, attr->stacksize, 
-                                  attr->priority);
+    int tid = thread_create(start_routine, arg,
+                            attr->stackaddr, attr->stacksize,
+                            attr->priority);
     if (tid < 0) return -1;
     
     *thread = (pthread_t)(intptr_t)tid;
@@ -59,7 +59,7 @@ int pthread_create(pthread_t* thread, pthread_attr_t* attr,
 }
 
 void pthread_exit(void* retval) {
-    user_exit((int)(intptr_t)retval);
+    exit((int)(intptr_t)retval);
 }
 
 pthread_t pthread_self(void) {
@@ -68,19 +68,19 @@ pthread_t pthread_self(void) {
 
 int pthread_join(pthread_t thread, void** retval) {
     int tid = (int)(intptr_t)thread;
-    return user_thread_join(tid);
+    return thread_join(tid);
 }
 
 int pthread_delay(int ticks) {
-    return user_delay(ticks);
+    return delay(ticks);
 }
 
 pup_tick_t pup_tick_get(void) {
-    return (pup_tick_t)user_tick_get();
+    return (pup_tick_t)tick_get();
 }
 
 int sched_yield(void) {
-    user_yield();
+    sys_yield();
     return 0;
 }
 
@@ -370,7 +370,7 @@ int snprintf(char* buf, size_t size, const char* fmt, ...) {
 
 int vprintf(const char* fmt, va_list args) {
     int n = vsnprintf(_printk_buf, USER_LIBC_PRINTK_BUF_SIZE, fmt, args);
-    user_write(USER_FD_STDOUT, _printk_buf, n);
+    write(STDOUT_FILENO, _printk_buf, n);
     return n;
 }
 

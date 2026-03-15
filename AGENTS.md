@@ -12,7 +12,6 @@
 
 ## 2. 关键目录
 
-- `apps/`: 内核态示例与入口应用（含 shell 与测试入口）。
 - `core/`: 核心实现。
 - `core/kernel/`: 调度、syscall、MPU 等核心内核逻辑。
 - `core/arch/`: 架构相关代码（Cortex-M、RISC-V、syscall/user thread 汇编入口）。
@@ -20,7 +19,7 @@
 - `core/fs/`: 文件系统与 devfs/romfs 相关实现。
 - `core/app/`: 用户应用加载与管理。
 - `dtm/`: 板级与芯片支持包、链接脚本、启动文件。
-- `user_apps/`: 用户态 app、运行时、链接脚本。
+- `apps/`: 用户态 app、运行时、链接脚本。
 - `tools/`: QEMU 启动脚本与固件打包脚本。
 - `output/`: 构建产物目录（如 `puppy.bin`、`firmware.bin`、`*_app.bin`）。
 
@@ -57,7 +56,7 @@ xmake build firmware
 4. `core/kernel/puppy_core.c`
 5. `core/syscall*` 与 `core/arch/*`
 6. `core/fs/*`（若问题与文件系统/设备节点相关）
-7. `core/app/*` 与 `user_apps/*`（若问题与用户态应用相关）
+7. `core/app/*` 与 `apps/*`（若问题与用户态应用相关）
 
 ## 5. 修改原则（面向智能体）
 

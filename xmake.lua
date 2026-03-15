@@ -55,7 +55,7 @@ target("puppy")
     )
 
     add_files(
-        "apps/*.c",
+        "core/*.c",
         "core/**/*.c",
         "core/**/*.S",
         "dtm/ips/*.c",
@@ -82,19 +82,19 @@ function define_user_app_target(target_name, app_source, output_bin_name)
 
         set_arch("cortex-m4")
         set_plat("cross")
-        add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -ffunction-sections -fdata-sections -fno-builtin-printf')
+        add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -ffunction-sections -fdata-sections -fno-builtin-printf -fno-builtin-execve')
         add_cxflags('-fpie -fPIC -msingle-pic-base -mno-pic-data-is-text-relative')
         add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -ffunction-sections -fdata-sections')
         add_mode_compile_flags()
         add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
-        add_ldflags(' -T ' .. os.scriptdir() .. '/user_apps/linker/app.lds')
+        add_ldflags(' -T ' .. os.scriptdir() .. '/apps/linker/app.lds')
 
-        add_includedirs("user_apps/include", "core")
+        add_includedirs("apps/include", "core")
 
         add_files(
             app_source,
-            "user_apps/runtime/user_libc.c",
-            "user_apps/runtime/user_syscall.S"
+            "apps/runtime/libc.c",
+            "apps/runtime/syscall.S"
         )
 
         after_build(function (target)
@@ -103,9 +103,9 @@ function define_user_app_target(target_name, app_source, output_bin_name)
         end)
 end
 
-define_user_app_target("hello", "user_apps/apps/hello/main.c", "hello.bin")
-define_user_app_target("shell", "user_apps/apps/shell/main.c", "shell.bin")
-define_user_app_target("test", "user_apps/apps/test/main.c", "test.bin")
+define_user_app_target("hello", "apps/hello/main.c", "hello.bin")
+define_user_app_target("shell", "apps/shell/main.c", "shell.bin")
+define_user_app_target("test", "apps/test/main.c", "test.bin")
 
 target("firmware")
     set_kind("phony")

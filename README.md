@@ -96,10 +96,10 @@ xmake build firmware
 
 ### 5.1 目录约定
 
-- user_apps/apps/<app_name>/main.c：用户应用入口
-- user_apps/runtime：用户态运行时与 syscall 桥
-- user_apps/linker/app.lds：用户应用链接脚本
-- user_apps/include：用户态公共头文件
+- apps/<app_name>/main.c：用户应用入口
+- apps/runtime：用户态运行时与 syscall 桥
+- apps/linker/app.lds：用户应用链接脚本
+- apps/include：用户态公共头文件
 
 ### 5.2 新增一个用户应用的最小步骤
 

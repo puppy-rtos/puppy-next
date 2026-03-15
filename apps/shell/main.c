@@ -1,6 +1,6 @@
-#include "user_libc.h"
-#include "user_syscall.h"
-#include "user_fs.h"
+#include "libc.h"
+#include "syscall.h"
+#include "fs.h"
 #include "app_header.h"
 
 #define PUP_SHELL_MAX_CMD_LEN  128
@@ -101,7 +101,7 @@ static int shell_saved_buf_pos = 0;
 
 static void shell_putchar(char c)
 {
-    user_write(USER_FD_STDOUT, &c, 1);
+    write(STDOUT_FILENO, &c, 1);
 }
 
 static void shell_puts(const char *str)
@@ -117,7 +117,7 @@ static void shell_puts(const char *str)
 static int shell_getchar(void)
 {
     char c;
-    int ret = user_read(USER_FD_STDIN, &c, 1);
+    int ret = read(STDIN_FILENO, &c, 1);
 
     if (ret > 0) {
         return (int)(unsigned char)c;
@@ -295,7 +295,7 @@ static int shell_cmd_help(int argc, char **argv)
 
 static int shell_cmd_ps(int argc, char **argv)
 {
-    user_ps();
+    ps();
     return 0;
 }
 
@@ -311,7 +311,7 @@ static int shell_cmd_ls(int argc, char **argv)
     struct dirent entry;
     int ret;
     
-    fd = user_open(path, O_DIRECTORY);
+    fd = open(path, O_DIRECTORY);
     if (fd < 0) {
         printf("Error: Cannot open %s (ret=%d)\n", path, fd);
         return -1;
@@ -322,7 +322,7 @@ static int shell_cmd_ls(int argc, char **argv)
     printf("  ----  ----\n");
     
     while (1) {
-        ret = user_getdents(fd, &entry, sizeof(entry));
+        ret = getdents(fd, &entry, sizeof(entry));
         if (ret <= 0) break;
         
         const char *type_str = "file";
@@ -332,7 +332,7 @@ static int shell_cmd_ls(int argc, char **argv)
         printf("  %s  %s\n", type_str, entry.d_name);
     }
     
-    user_close(fd);
+    close(fd);
     return 0;
 }
 
@@ -344,7 +344,7 @@ static int shell_cmd_cat(int argc, char **argv)
         return -1;
     }
     
-    int fd = user_open(argv[1], O_RDONLY);
+    int fd = open(argv[1], O_RDONLY);
     if (fd < 0) {
         printf("Error: Cannot open %s (fd=%d)\n", argv[1], fd);
         return -1;
@@ -357,7 +357,7 @@ static int shell_cmd_cat(int argc, char **argv)
     int total = 0;
     int max_read = 100;
     
-    while ((n = user_fs_read(fd, buf, sizeof(buf))) > 0 && total < max_read) {
+    while ((n = fs_read(fd, buf, sizeof(buf))) > 0 && total < max_read) {
         for (int i = 0; i < n; i++) {
             if (buf[i] >= 0x20 && buf[i] < 0x7F) {
                 printf("%c", buf[i]);
@@ -371,7 +371,7 @@ static int shell_cmd_cat(int argc, char **argv)
     }
     
     printf("\n[Total: %d bytes]\n", total);
-    user_close(fd);
+    close(fd);
     return 0;
 }
 
@@ -399,22 +399,22 @@ static int shell_cmd_echo(int argc, char **argv)
     
     const char *file = argv[redirect_pos + 1];
     
-    int fd = user_open(file, 0x0002);
+    int fd = open(file, 0x0002);
     if (fd < 0) {
         printf("Error: Cannot open %s (fd=%d)\n", file, fd);
         return -1;
     }
     
     for (int i = 1; i < redirect_pos; i++) {
-        user_fs_write(fd, argv[i], strlen(argv[i]));
+        fs_write(fd, argv[i], strlen(argv[i]));
         if (i < redirect_pos - 1) {
-            user_fs_write(fd, " ", 1);
+            fs_write(fd, " ", 1);
         }
     }
-    user_fs_write(fd, "\n", 1);
+    fs_write(fd, "\n", 1);
     
     printf("Written to %s\n", file);
-    user_close(fd);
+    close(fd);
     return 0;
 }
 
@@ -426,14 +426,14 @@ static int shell_cmd_clear(int argc, char **argv)
 
 static int shell_cmd_apps(int argc, char **argv)
 {
-    return user_apps();
+    return apps();
 }
 
 static int shell_cmd_free(int argc, char **argv)
 {
     pup_heap_info_t info;
 
-    if (user_free(&info) < 0) {
+    if (free_info(&info) < 0) {
         printf("Error: failed to query heap usage\n");
         return -1;
     }
@@ -461,7 +461,7 @@ static int shell_cmd_exit(int argc, char **argv)
     }
 
     printf("Exiting user shell...\n");
-    user_exit(exit_code);
+    exit(exit_code);
     return 0;
 }
 
@@ -573,7 +573,7 @@ static int shell_exec_cmd(int argc, char **argv)
             arg_ptr = app_arg;
         }
 
-        result = user_execve_with_arg(path, app_name, arg_ptr, wait);
+        result = execve_with_arg(path, app_name, arg_ptr, wait);
         if (result >= 0) {
             if (wait) {
                 return result;

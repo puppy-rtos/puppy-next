@@ -1,5 +1,5 @@
-#include "user_libc.h"
-#include "user_syscall.h"
+#include "libc.h"
+#include "syscall.h"
 #include "app_header.h"
 
 extern void app_main(const char* arg);

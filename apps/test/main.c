@@ -1,5 +1,5 @@
-#include "user_libc.h"
-#include "user_syscall.h"
+#include "libc.h"
+#include "syscall.h"
 #include "app_header.h"
 
 #define O_RDONLY    0000000
@@ -72,7 +72,7 @@ static void *sem_waiter_thread(void *arg)
     (void)arg;
 
     printf("[sem] waiter: waiting...\n");
-    if (user_sem_wait(sem_test_handle) != 0) {
+    if (sem_wait(sem_test_handle) != 0) {
         printf("[sem] waiter: wait failed\n");
         sem_waiter_done = -1;
         return NULL;
@@ -225,7 +225,7 @@ static int test_devfs(void)
     printf("\n=== DevFS Test ===\n");
 
     printf("\n--- Test 1: Open UART device ---\n");
-    fd = user_open("/dev/uart0", O_RDWR);
+    fd = open("/dev/uart0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open uart0, fd=%d\n", fd);
         return -1;
@@ -233,15 +233,15 @@ static int test_devfs(void)
     printf("Opened uart0, fd=%d\n", fd);
 
     printf("\n--- Test 2: Write to UART ---\n");
-    written = (int)user_write(fd, msg, (long)strlen(msg));
+    written = (int)write(fd, msg, (long)strlen(msg));
     printf("Written %d bytes\n", written);
 
     printf("\n--- Test 3: Close UART ---\n");
-    user_close(fd);
+    close(fd);
     printf("Closed uart0\n");
 
     printf("\n--- Test 4: Open GPIO device ---\n");
-    fd = user_open("/dev/gpio0", O_RDWR);
+    fd = open("/dev/gpio0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open gpio0, fd=%d\n", fd);
         return -1;
@@ -250,17 +250,17 @@ static int test_devfs(void)
 
     printf("\n--- Test 5: GPIO write/read ---\n");
     val = 1;
-    user_write(fd, &val, 1);
+    write(fd, &val, 1);
     printf("Set GPIO high\n");
 
     val = 0;
-    user_write(fd, &val, 1);
+    write(fd, &val, 1);
     printf("Set GPIO low\n");
 
-    user_read(fd, &read_val, 1);
+    read(fd, &read_val, 1);
     printf("Read GPIO value: %d\n", read_val);
 
-    user_close(fd);
+    close(fd);
     printf("Closed gpio0\n");
 
     printf("\nDevFS test completed\n");
@@ -277,7 +277,7 @@ static int test_romfs(void)
     printf("\n=== ROMFS Test ===\n");
 
     printf("\n--- Test 1: Open /rom directory ---\n");
-    fd = user_open("/rom", O_DIRECTORY);
+    fd = open("/rom", O_DIRECTORY);
     if (fd < 0) {
         printf("Failed to open /rom, fd=%d\n", fd);
         return -1;
@@ -285,13 +285,13 @@ static int test_romfs(void)
     printf("Opened /rom directory, fd=%d\n", fd);
 
     printf("\n--- Test 2: List files in ROMFS ---\n");
-    while ((ret = user_getdents(fd, &entry, sizeof(entry))) > 0) {
+    while ((ret = getdents(fd, &entry, sizeof(entry))) > 0) {
         printf("  [%d] %s (type=%d)\n", file_count, entry.d_name, entry.d_type);
         file_count++;
     }
 
     printf("Total files found: %d\n", file_count);
-    user_close(fd);
+    close(fd);
 
     if (file_count == 0) {
         printf("WARNING: No files found in ROMFS\n");
@@ -299,21 +299,21 @@ static int test_romfs(void)
     }
 
     printf("\n--- Test 3: Try to read first file ---\n");
-    fd = user_open("/rom", O_DIRECTORY);
+    fd = open("/rom", O_DIRECTORY);
     if (fd >= 0) {
-        ret = user_getdents(fd, &entry, sizeof(entry));
+        ret = getdents(fd, &entry, sizeof(entry));
         if (ret > 0) {
             char filepath[262];
             int file_fd;
 
             snprintf(filepath, sizeof(filepath), "/rom/%s", entry.d_name);
-            file_fd = user_open(filepath, O_RDONLY);
+            file_fd = open(filepath, O_RDONLY);
             if (file_fd >= 0) {
                 char buf[32];
                 int n;
 
                 printf("Opened file: %s\n", filepath);
-                n = (int)user_read(file_fd, buf, sizeof(buf));
+                n = (int)read(file_fd, buf, sizeof(buf));
                 if (n > 0) {
                     printf("Read %d bytes from file\n", n);
                     printf("First 16 bytes: ");
@@ -322,12 +322,12 @@ static int test_romfs(void)
                     }
                     printf("\n");
                 }
-                user_close(file_fd);
+                close(file_fd);
             } else {
                 printf("Failed to open file %s, fd=%d\n", filepath, file_fd);
             }
         }
-        user_close(fd);
+        close(fd);
     }
 
     printf("\nROMFS test completed\n");
@@ -344,21 +344,21 @@ static int test_led(void)
     printf("\n=== LED Test (PF11) ===\n");
     printf("Blinking /dev/led0 at 1Hz for 3 seconds...\n");
 
-    fd = user_open("/dev/led0", O_RDWR);
+    fd = open("/dev/led0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open /dev/led0, fd=%d\n", fd);
         return -1;
     }
 
     for (int i = 0; i < cycles; i++) {
-        user_write(fd, &high, 1);
-        user_delay(500);
-        user_write(fd, &low, 1);
-        user_delay(500);
+        write(fd, &high, 1);
+        delay(500);
+        write(fd, &low, 1);
+        delay(500);
     }
 
-    user_write(fd, &low, 1);
-    user_close(fd);
+    write(fd, &low, 1);
+    close(fd);
     printf("LED test completed\n");
     return 0;
 }
@@ -373,14 +373,14 @@ static int test_key0(void)
     printf("\n=== KEY0 Test (PC5) ===\n");
     printf("Reading /dev/key0 for 5 seconds...\n");
 
-    fd = user_open("/dev/key0", O_RDONLY);
+    fd = open("/dev/key0", O_RDONLY);
     if (fd < 0) {
         printf("Failed to open /dev/key0, fd=%d\n", fd);
         return -1;
     }
 
     while (elapsed_ms < 5000) {
-        if (user_read(fd, &value, 1) > 0) {
+        if (read(fd, &value, 1) > 0) {
             int state = value ? 1 : 0;
             if (state != last_state) {
                 printf("[key0] t=%dms, state=%d (%s)\n", elapsed_ms, state,
@@ -389,11 +389,11 @@ static int test_key0(void)
             }
         }
 
-        user_delay(10);
+        delay(10);
         elapsed_ms += 10;
     }
 
-    user_close(fd);
+    close(fd);
     printf("KEY0 test completed\n");
     return 0;
 }
@@ -405,7 +405,7 @@ static int test_sem(void)
 
     printf("\n=== Named Semaphore IPC Test ===\n");
 
-    sem_test_handle = user_sem_open("/test_sem", PUP_SEM_CREATE, 0);
+    sem_test_handle = sem_open("/test_sem", PUP_SEM_CREATE, 0);
     if (sem_test_handle < 0) {
         printf("[sem] open failed\n");
         return -1;
@@ -420,26 +420,26 @@ static int test_sem(void)
 
     if (pthread_create(&thread, &attr, sem_waiter_thread, NULL) != 0) {
         printf("[sem] create waiter failed\n");
-        user_sem_close(sem_test_handle);
+        sem_close(sem_test_handle);
         sem_test_handle = -1;
         return -1;
     }
 
-    user_delay(20);
+    delay(20);
 
     if (sem_waiter_done != 0) {
         printf("[sem] unexpected waiter state before post=%d\n", sem_waiter_done);
         pthread_join(thread, NULL);
-        user_sem_close(sem_test_handle);
+        sem_close(sem_test_handle);
         sem_test_handle = -1;
         return -1;
     }
 
     printf("[sem] post from main\n");
-    if (user_sem_post(sem_test_handle) != 0) {
+    if (sem_post(sem_test_handle) != 0) {
         printf("[sem] post failed\n");
         pthread_join(thread, NULL);
-        user_sem_close(sem_test_handle);
+        sem_close(sem_test_handle);
         sem_test_handle = -1;
         return -1;
     }
@@ -448,12 +448,12 @@ static int test_sem(void)
 
     if (sem_waiter_done != 1) {
         printf("[sem] waiter did not wake correctly, state=%d\n", sem_waiter_done);
-        user_sem_close(sem_test_handle);
+        sem_close(sem_test_handle);
         sem_test_handle = -1;
         return -1;
     }
 
-    if (user_sem_close(sem_test_handle) != 0) {
+    if (sem_close(sem_test_handle) != 0) {
         printf("[sem] close failed\n");
         sem_test_handle = -1;
         return -1;
@@ -541,12 +541,12 @@ void app_main(const char* arg)
 
     if (!arg || *skip_spaces(arg) == '\0') {
         print_usage();
-        user_exit(0);
+        exit(0);
     }
 
     if (copy_first_token(arg, test_name, sizeof(test_name)) < 0) {
         printf("Test name too long\n");
-        user_exit(-1);
+        exit(-1);
     }
 
     if (strcmp(test_name, "all") == 0) {
@@ -557,9 +557,9 @@ void app_main(const char* arg)
                 ret = one_ret;
             }
         }
-        user_exit(ret);
+        exit(ret);
     }
 
     ret = run_named_test(test_name);
-    user_exit(ret);
+    exit(ret);
 }

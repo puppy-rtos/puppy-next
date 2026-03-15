@@ -314,12 +314,78 @@ static int test_romfs(void)
     return 0;
 }
 
+static int test_led(void)
+{
+    int fd;
+    char high = 1;
+    char low = 0;
+    int cycles = 3;
+
+    printf("\n=== LED Test (PF11) ===\n");
+    printf("Blinking /dev/led0 at 1Hz for 3 seconds...\n");
+
+    fd = user_open("/dev/led0", O_RDWR);
+    if (fd < 0) {
+        printf("Failed to open /dev/led0, fd=%d\n", fd);
+        return -1;
+    }
+
+    for (int i = 0; i < cycles; i++) {
+        user_write(fd, &high, 1);
+        user_delay(500);
+        user_write(fd, &low, 1);
+        user_delay(500);
+    }
+
+    user_write(fd, &low, 1);
+    user_close(fd);
+    printf("LED test completed\n");
+    return 0;
+}
+
+static int test_key0(void)
+{
+    int fd;
+    int last_state = -1;
+    int elapsed_ms = 0;
+    char value = 0;
+
+    printf("\n=== KEY0 Test (PC5) ===\n");
+    printf("Reading /dev/key0 for 5 seconds...\n");
+
+    fd = user_open("/dev/key0", O_RDONLY);
+    if (fd < 0) {
+        printf("Failed to open /dev/key0, fd=%d\n", fd);
+        return -1;
+    }
+
+    while (elapsed_ms < 5000) {
+        if (user_read(fd, &value, 1) > 0) {
+            int state = value ? 1 : 0;
+            if (state != last_state) {
+                printf("[key0] t=%dms, state=%d (%s)\n", elapsed_ms, state,
+                       state ? "released" : "pressed");
+                last_state = state;
+            }
+        }
+
+        user_delay(10);
+        elapsed_ms += 10;
+    }
+
+    user_close(fd);
+    printf("KEY0 test completed\n");
+    return 0;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
     {"mpu", "Show why MPU test stays in kernel", test_mpu},
     {"devfs", "Test device file system", test_devfs},
     {"romfs", "Test ROMFS file listing", test_romfs},
+    {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
+    {"key", "Read PC5 key0 status for 5 seconds", test_key0},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

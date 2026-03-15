@@ -6,6 +6,7 @@
 #include <stdarg.h>
 
 typedef void* pthread_t;
+typedef unsigned long pup_tick_t;
 typedef struct {
     const char* name;
     void* stackaddr;
@@ -29,6 +30,9 @@ int pthread_create(pthread_t* thread, pthread_attr_t* attr,
 void pthread_exit(void* retval);
 pthread_t pthread_self(void);
 int pthread_join(pthread_t thread, void** retval);
+int pthread_delay(int ticks);
+
+pup_tick_t pup_tick_get(void);
 
 int sched_yield(void);
 

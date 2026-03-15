@@ -148,11 +148,35 @@ static int shell_cmd_clear(int argc, char **argv)
     return 0;
 }
 
-extern int test_exec(int argc, char **argv);
-
 static int shell_cmd_test(int argc, char **argv)
 {
-    return test_exec(argc - 1, argv + 1);
+    char arg_buf[APP_EXEC_ARG_AREA_SIZE];
+    int offset = 0;
+
+    libcm_memset(arg_buf, 0, sizeof(arg_buf));
+
+    for (int i = 1; i < argc; i++) {
+        int arg_len = (int)libcm_strlen(argv[i]);
+
+        if (offset != 0) {
+            if (offset >= (int)sizeof(arg_buf) - 1) {
+                PUP_PRINTK("Error: test arguments too long\n");
+                return -1;
+            }
+            arg_buf[offset++] = ' ';
+        }
+
+        if (offset + arg_len >= (int)sizeof(arg_buf)) {
+            PUP_PRINTK("Error: test arguments too long\n");
+            return -1;
+        }
+
+        libcm_memcpy(&arg_buf[offset], argv[i], arg_len);
+        offset += arg_len;
+    }
+
+    return app_exec_with_arg("test_app", "/rom/test_app",
+                             offset > 0 ? arg_buf : PUP_NULL, 1);
 }
 
 int shell_cmd_ls(int argc, char **argv)

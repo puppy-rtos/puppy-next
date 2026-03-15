@@ -23,6 +23,7 @@
 #define SYS_GETPID     14
 #define SYS_DELAY      15
 #define SYS_APPS       16
+#define SYS_TICK_GET   17
 
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 

@@ -71,6 +71,14 @@ int pthread_join(pthread_t thread, void** retval) {
     return user_thread_join(tid);
 }
 
+int pthread_delay(int ticks) {
+    return user_delay(ticks);
+}
+
+pup_tick_t pup_tick_get(void) {
+    return (pup_tick_t)user_tick_get();
+}
+
 int sched_yield(void) {
     user_yield();
     return 0;

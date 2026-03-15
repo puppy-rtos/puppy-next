@@ -325,6 +325,10 @@ static long sys_apps(long arg1, long arg2, long arg3, long arg4) {
     return 0;
 }
 
+static long sys_tick_get(long arg1, long arg2, long arg3, long arg4) {
+    return (long)pup_tick_get();
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -342,6 +346,7 @@ static const syscall_func_t syscall_table[] = {
     [SYS_GETPID] = sys_getpid,
     [SYS_DELAY] = sys_delay,
     [SYS_APPS] = sys_apps,
+    [SYS_TICK_GET] = sys_tick_get,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

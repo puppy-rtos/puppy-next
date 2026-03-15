@@ -21,6 +21,7 @@
 #define SYS_GETPID     14
 #define SYS_DELAY      15
 #define SYS_APPS       16
+#define SYS_TICK_GET   17
 
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
@@ -101,6 +102,10 @@ static inline int user_delay(int ticks) {
 
 static inline int user_apps(void) {
     return (int)syscall(SYS_APPS, 0, 0, 0, 0);
+}
+
+static inline unsigned long user_tick_get(void) {
+    return (unsigned long)syscall(SYS_TICK_GET, 0, 0, 0, 0);
 }
 
 #endif

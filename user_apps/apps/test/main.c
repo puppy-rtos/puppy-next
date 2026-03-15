@@ -59,9 +59,29 @@ static volatile int delay_thread_done;
 static char pth1_stack[4096];
 static char pth2_stack[4096];
 static char delay_thread_stack[4096];
+static char sem_waiter_stack[2048];
+
+static volatile int sem_waiter_done;
+static int sem_test_handle = -1;
 
 static void print_usage(void);
 static int run_named_test(const char *name);
+
+static void *sem_waiter_thread(void *arg)
+{
+    (void)arg;
+
+    printf("[sem] waiter: waiting...\n");
+    if (user_sem_wait(sem_test_handle) != 0) {
+        printf("[sem] waiter: wait failed\n");
+        sem_waiter_done = -1;
+        return NULL;
+    }
+
+    printf("[sem] waiter: wake up\n");
+    sem_waiter_done = 1;
+    return NULL;
+}
 
 static void *a_thread_func(void *arg)
 {
@@ -378,6 +398,72 @@ static int test_key0(void)
     return 0;
 }
 
+static int test_sem(void)
+{
+    pthread_t thread;
+    pthread_attr_t attr;
+
+    printf("\n=== Named Semaphore IPC Test ===\n");
+
+    sem_test_handle = user_sem_open("/test_sem", PUP_SEM_CREATE, 0);
+    if (sem_test_handle < 0) {
+        printf("[sem] open failed\n");
+        return -1;
+    }
+    printf("[sem] open ok, handle=%d\n", sem_test_handle);
+
+    sem_waiter_done = 0;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, sizeof(sem_waiter_stack));
+    pthread_attr_setstackaddr(&attr, sem_waiter_stack);
+    pthread_attr_setname(&attr, "sem_waiter");
+
+    if (pthread_create(&thread, &attr, sem_waiter_thread, NULL) != 0) {
+        printf("[sem] create waiter failed\n");
+        user_sem_close(sem_test_handle);
+        sem_test_handle = -1;
+        return -1;
+    }
+
+    user_delay(20);
+
+    if (sem_waiter_done != 0) {
+        printf("[sem] unexpected waiter state before post=%d\n", sem_waiter_done);
+        pthread_join(thread, NULL);
+        user_sem_close(sem_test_handle);
+        sem_test_handle = -1;
+        return -1;
+    }
+
+    printf("[sem] post from main\n");
+    if (user_sem_post(sem_test_handle) != 0) {
+        printf("[sem] post failed\n");
+        pthread_join(thread, NULL);
+        user_sem_close(sem_test_handle);
+        sem_test_handle = -1;
+        return -1;
+    }
+
+    pthread_join(thread, NULL);
+
+    if (sem_waiter_done != 1) {
+        printf("[sem] waiter did not wake correctly, state=%d\n", sem_waiter_done);
+        user_sem_close(sem_test_handle);
+        sem_test_handle = -1;
+        return -1;
+    }
+
+    if (user_sem_close(sem_test_handle) != 0) {
+        printf("[sem] close failed\n");
+        sem_test_handle = -1;
+        return -1;
+    }
+
+    sem_test_handle = -1;
+    printf("[sem] test completed\n");
+    return 0;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -386,6 +472,7 @@ static const test_cmd_t test_cmds[] = {
     {"romfs", "Test ROMFS file listing", test_romfs},
     {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
     {"key", "Read PC5 key0 status for 5 seconds", test_key0},
+    {"sem", "Test named semaphore wait/post/close", test_sem},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

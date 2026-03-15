@@ -8,6 +8,7 @@
 #include "pup_fs.h"
 #include "pup_console.h"
 #include "kheap.h"
+#include "pup_sem.h"
 
 void syscall_uart_rx_init(void)
 {
@@ -392,6 +393,25 @@ static long sys_free(long arg1, long arg2, long arg3, long arg4) {
     return 0;
 }
 
+static long sys_sem_open(long arg1, long arg2, long arg3, long arg4) {
+    const char *name  = (const char *)arg1;
+    int         flags = (int)arg2;
+    unsigned int value = (unsigned int)arg3;
+    return (long)pup_sem_open(name, flags, value);
+}
+
+static long sys_sem_close(long arg1, long arg2, long arg3, long arg4) {
+    return (long)pup_sem_close((int)arg1);
+}
+
+static long sys_sem_wait(long arg1, long arg2, long arg3, long arg4) {
+    return (long)pup_sem_wait((int)arg1);
+}
+
+static long sys_sem_post(long arg1, long arg2, long arg3, long arg4) {
+    return (long)pup_sem_post((int)arg1);
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -411,6 +431,10 @@ static const syscall_func_t syscall_table[] = {
     [SYS_APPS] = sys_apps,
     [SYS_TICK_GET] = sys_tick_get,
     [SYS_FREE] = sys_free,
+    [SYS_SEM_OPEN]  = sys_sem_open,
+    [SYS_SEM_CLOSE] = sys_sem_close,
+    [SYS_SEM_WAIT]  = sys_sem_wait,
+    [SYS_SEM_POST]  = sys_sem_post,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

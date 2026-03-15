@@ -46,6 +46,7 @@ target("puppy")
         "core/app",
         "core/kernel",
         "core/arch",
+        "core/ipc",
         "dtm",
         "dtm/ips",
         "dtm/common",

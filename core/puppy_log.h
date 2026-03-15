@@ -20,7 +20,8 @@
 #define PUP_LOG_MODULE_FS        8
 #define PUP_LOG_MODULE_DEV       9
 #define PUP_LOG_MODULE_KHEAP     10
-#define PUP_LOG_MODULE_MAX       11
+#define PUP_LOG_MODULE_IPC       11
+#define PUP_LOG_MODULE_MAX       12
 
 #ifndef PUP_LOG_LEVEL_DEFAULT
 #define PUP_LOG_LEVEL_DEFAULT PUP_LOG_LEVEL_INFO
@@ -37,6 +38,7 @@
 #define PUP_LOG_LEVEL_FS        PUP_LOG_LEVEL_DEFAULT
 #define PUP_LOG_LEVEL_DEV       PUP_LOG_LEVEL_DEFAULT
 #define PUP_LOG_LEVEL_KHEAP     PUP_LOG_LEVEL_DEFAULT
+#define PUP_LOG_LEVEL_IPC       PUP_LOG_LEVEL_DEFAULT
 
 static const int pup_log_levels[PUP_LOG_MODULE_MAX] = {
     PUP_LOG_LEVEL_CORE,
@@ -50,6 +52,7 @@ static const int pup_log_levels[PUP_LOG_MODULE_MAX] = {
     PUP_LOG_LEVEL_FS,
     PUP_LOG_LEVEL_DEV,
     PUP_LOG_LEVEL_KHEAP,
+    PUP_LOG_LEVEL_IPC,
 };
 
 static const char* const pup_log_module_names[PUP_LOG_MODULE_MAX] = {
@@ -64,6 +67,7 @@ static const char* const pup_log_module_names[PUP_LOG_MODULE_MAX] = {
     "FS",
     "DEV",
     "KHEAP",
+    "IPC",
 };
 
 static const char* const pup_log_level_names[] = {

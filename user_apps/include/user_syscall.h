@@ -2,6 +2,7 @@
 #define __USER_SYSCALL_H__
 
 #include "shared/pup_heap_info.h"
+#include "shared/pup_ipc.h"
 
 #define USER_FD_STDIN   0
 #define USER_FD_STDOUT  1
@@ -25,6 +26,11 @@
 #define SYS_APPS       16
 #define SYS_TICK_GET   17
 #define SYS_FREE       18
+
+#define SYS_SEM_OPEN   19
+#define SYS_SEM_CLOSE  20
+#define SYS_SEM_WAIT   21
+#define SYS_SEM_POST   22
 
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
@@ -117,6 +123,22 @@ static inline unsigned long user_tick_get(void) {
 
 static inline int user_free(pup_heap_info_t* info) {
     return (int)syscall(SYS_FREE, (long)info, 0, 0, 0);
+}
+
+static inline int user_sem_open(const char *name, int flags, unsigned int value) {
+    return (int)syscall(SYS_SEM_OPEN, (long)name, (long)flags, (long)value, 0);
+}
+
+static inline int user_sem_close(int handle) {
+    return (int)syscall(SYS_SEM_CLOSE, (long)handle, 0, 0, 0);
+}
+
+static inline int user_sem_wait(int handle) {
+    return (int)syscall(SYS_SEM_WAIT, (long)handle, 0, 0, 0);
+}
+
+static inline int user_sem_post(int handle) {
+    return (int)syscall(SYS_SEM_POST, (long)handle, 0, 0, 0);
 }
 
 #endif

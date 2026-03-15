@@ -55,17 +55,33 @@ static int gpio_read(pup_devfs_file_t *file, char *buf, int len)
 static int gpio_write(pup_devfs_file_t *file, const char *buf, int len)
 {
     gpio_dev_data_t *data = (gpio_dev_data_t *)file->private_data;
-    
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_write: gpiox=0x%x, pin=%d, value=%d", 
-                  data->gpiox, data->pinx, buf[0]);
-    
-    if (len > 0) {
-        dtm_gpio_pin_set(data->gpiox, data->pinx, buf[0] ? 1 : 0);
-        data->value = buf[0] ? 1 : 0;
-        return 1;
+    int value;
+    unsigned char ch;
+
+    if (len <= 0) {
+        return 0;
+    }
+
+    ch = (unsigned char)buf[0];
+    if (ch == '\n' || ch == '\r') {
+        return 0;
+    }
+
+    if (ch == '0') {
+        value = 0;
+    } else if (ch == '1') {
+        value = 1;
+    } else {
+        value = ch ? 1 : 0;
     }
     
-    return 0;
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_write: gpiox=0x%x, pin=%d, raw=%d, value=%d", 
+                  data->gpiox, data->pinx, ch, value);
+
+    dtm_gpio_pin_set(data->gpiox, data->pinx, value);
+    data->value = (uint8_t)value;
+    return 1;
+    
 }
 
 static int gpio_ioctl(pup_devfs_file_t *file, int cmd, void *arg)

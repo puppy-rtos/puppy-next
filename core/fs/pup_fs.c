@@ -605,6 +605,7 @@ int pup_close(int fd)
     }
 
     pup_fd_put(fd, fd_obj);
+    pup_fd_free_slot(fd);
 
     return result;
 }

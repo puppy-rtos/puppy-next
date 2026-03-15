@@ -69,8 +69,6 @@ static int shell_cmd_ls(int argc, char **argv);
 static int shell_cmd_cat(int argc, char **argv);
 static int shell_cmd_echo(int argc, char **argv);
 static int shell_cmd_clear(int argc, char **argv);
-static int shell_cmd_run(int argc, char **argv);
-static int shell_cmd_runw(int argc, char **argv);
 static int shell_cmd_apps(int argc, char **argv);
 static int shell_cmd_exit(int argc, char **argv);
 static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len);
@@ -82,8 +80,6 @@ static const shell_cmd_t shell_cmds[] = {
     {"cat",   "Read from device (usage: cat <device>)", shell_cmd_cat},
     {"echo",  "Write to device (usage: echo <text> > <device>)", shell_cmd_echo},
     {"clear", "Clear screen", shell_cmd_clear},
-    {"run",   "Run app in background (usage: run <app_name>)", shell_cmd_run},
-    {"runw",  "Run app and wait (usage: runw <app_name>)", shell_cmd_runw},
     {"apps",  "List running apps", shell_cmd_apps},
     {"exit",  "Exit user shell and return to kernel shell", shell_cmd_exit},
 };
@@ -264,80 +260,6 @@ static int shell_cmd_clear(int argc, char **argv)
     return 0;
 }
 
-static int shell_cmd_run(int argc, char **argv)
-{
-    if (argc < 2) {
-        printf("Usage: run <app_name>\n");
-        printf("Example: run hello_app\n");
-        printf("Use 'ls /rom' to see available apps\n");
-        return -1;
-    }
-    
-    const char* app_name = argv[1];
-    char path[64];
-    char app_arg[PUP_SHELL_APP_ARG_LEN];
-    const char *arg_ptr = 0;
-    
-    snprintf(path, sizeof(path), "/rom/%s", app_name);
-
-    if (argc > 2) {
-        if (shell_build_exec_arg(argv, 2, argc, app_arg, sizeof(app_arg)) != 0) {
-            printf("Error: app arguments too long\n");
-            return -1;
-        }
-        arg_ptr = app_arg;
-    }
-    
-    printf("Running app: %s\n", app_name);
-    printf("Path: %s\n", path);
-    
-    int pid = user_execve_with_arg(path, app_name, arg_ptr, 0);
-    if (pid < 0) {
-        printf("Error: Failed to run app '%s' (ret=%d)\n", app_name, pid);
-        return -1;
-    }
-    
-    printf("App '%s' started with pid=%d (running in background)\n", app_name, pid);
-    return 0;
-}
-
-static int shell_cmd_runw(int argc, char **argv)
-{
-    if (argc < 2) {
-        printf("Usage: runw <app_name>\n");
-        printf("Example: runw hello_app\n");
-        printf("Use 'ls /rom' to see available apps\n");
-        return -1;
-    }
-    
-    const char* app_name = argv[1];
-    char path[64];
-    char app_arg[PUP_SHELL_APP_ARG_LEN];
-    const char *arg_ptr = 0;
-    
-    snprintf(path, sizeof(path), "/rom/%s", app_name);
-
-    if (argc > 2) {
-        if (shell_build_exec_arg(argv, 2, argc, app_arg, sizeof(app_arg)) != 0) {
-            printf("Error: app arguments too long\n");
-            return -1;
-        }
-        arg_ptr = app_arg;
-    }
-    
-    printf("Running app: %s (waiting for completion)\n", app_name);
-    printf("Path: %s\n", path);
-    
-    int exit_code = user_execve_with_arg(path, app_name, arg_ptr, 1);
-    if (exit_code < 0) {
-        printf("Error: Failed to run app '%s' (ret=%d)\n", app_name, exit_code);
-        return -1;
-    }
-    
-    printf("App '%s' exited with code: %d\n", app_name, exit_code);
-    return exit_code;
-}
-
 static int shell_cmd_apps(int argc, char **argv)
 {
     return user_apps();
@@ -442,24 +364,35 @@ static int shell_exec_cmd(int argc, char **argv)
         const char *app_name = shell_path_basename(path);
         char app_arg[PUP_SHELL_APP_ARG_LEN];
         const char *arg_ptr = 0;
-        int exit_code;
+        int wait = 1;
+        int arg_end = argc;
+        int result;
 
         if (*app_name == '\0') {
             printf("Invalid executable path: %s\n", path);
             return -1;
         }
 
-        if (argc > 1) {
-            if (shell_build_exec_arg(argv, 1, argc, app_arg, sizeof(app_arg)) != 0) {
+        if (argc > 1 && strcmp(argv[argc - 1], "&") == 0) {
+            wait = 0;
+            arg_end = argc - 1;
+        }
+
+        if (arg_end > 1) {
+            if (shell_build_exec_arg(argv, 1, arg_end, app_arg, sizeof(app_arg)) != 0) {
                 printf("Error: app arguments too long\n");
                 return -1;
             }
             arg_ptr = app_arg;
         }
 
-        exit_code = user_execve_with_arg(path, app_name, arg_ptr, 1);
-        if (exit_code >= 0) {
-            return exit_code;
+        result = user_execve_with_arg(path, app_name, arg_ptr, wait);
+        if (result >= 0) {
+            if (wait) {
+                return result;
+            }
+            printf("App '%s' started with pid=%d (running in background)\n", app_name, result);
+            return 0;
         }
     }
     
@@ -487,7 +420,7 @@ void app_main(void)
 {
     printf("=== Puppy Shell (User Mode) ===\n");
     printf("Type 'help' for available commands\n");
-    printf("New commands: run, runw, apps\n\n");
+    printf("Use absolute path to run apps, append '&' for background\n\n");
     
     int ch;
     shell_show_prompt();

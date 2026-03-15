@@ -33,26 +33,22 @@ typedef struct {
 static int shell_cmd_help(int argc, char **argv);
 static int shell_cmd_ps(int argc, char **argv);
 static int shell_cmd_apps(int argc, char **argv);
-static int shell_cmd_run(int argc, char **argv);
 static int shell_cmd_clear(int argc, char **argv);
 static int shell_cmd_test(int argc, char **argv);
 int shell_cmd_ls(int argc, char **argv);
 static int shell_cmd_cat(int argc, char **argv);
 static int shell_cmd_echo(int argc, char **argv);
-static int shell_cmd_ushell(int argc, char **argv);
 static int shell_cmd_free(int argc, char **argv);
 
 static const shell_cmd_t shell_cmds[] = {
     {"help",  "Show available commands", shell_cmd_help},
     {"ps",    "List all threads", shell_cmd_ps},
     {"apps",  "List running apps", shell_cmd_apps},
-    {"run",   "Run app in background (usage: run <app_name>)", shell_cmd_run},
     {"clear", "Clear screen", shell_cmd_clear},
     {"test",  "Run test cases (usage: test [name])", shell_cmd_test},
     {"ls",    "List directory (usage: ls [path])", shell_cmd_ls},
     {"cat",   "Read from device (usage: cat <device>)", shell_cmd_cat},
     {"echo",  "Write to device (usage: echo <text> > <device>)", shell_cmd_echo},
-    {"ushell", "Enter user shell (exit to return)", shell_cmd_ushell},
     {"free",  "Show kernel heap usage", shell_cmd_free},
 };
 
@@ -110,35 +106,6 @@ static int shell_cmd_ps(int argc, char **argv)
 static int shell_cmd_apps(int argc, char **argv)
 {
     app_list();
-    return 0;
-}
-
-static int shell_cmd_run(int argc, char **argv)
-{
-    const char *app_name;
-    char path[64];
-    int ret;
-
-    if (argc < 2) {
-        PUP_PRINTK("Usage: run <app_name>\n");
-        PUP_PRINTK("Example: run hello_app\n");
-        PUP_PRINTK("Use 'ls /rom' to see available apps\n");
-        return -1;
-    }
-
-    app_name = argv[1];
-    libcm_snprintf(path, sizeof(path), "/rom/%s", app_name);
-
-    PUP_PRINTK("Running app: %s\n", app_name);
-    PUP_PRINTK("Path: %s\n", path);
-
-    ret = app_exec(app_name, path, 0);
-    if (ret < 0) {
-        PUP_PRINTK("Error: Failed to run app '%s' (ret=%d)\n", app_name, ret);
-        return -1;
-    }
-
-    PUP_PRINTK("App '%s' started with pid=%d (running in background)\n", app_name, ret);
     return 0;
 }
 
@@ -298,22 +265,6 @@ static int shell_cmd_echo(int argc, char **argv)
     return 0;
 }
 
-static int shell_cmd_ushell(int argc, char **argv)
-{
-    int exit_code;
-
-    PUP_PRINTK("Starting user shell...\n");
-    exit_code = app_exec("shell_app", "/rom/shell_app", 1);
-    if (exit_code < 0) {
-        PUP_PRINTK("Failed to start user shell\n");
-        return -1;
-    }
-
-    PUP_PRINTK("User shell exited (code=%d), back to kernel shell\n", exit_code);
-    pup_reap_zombies();
-    return 0;
-}
-
 static int shell_cmd_free(int argc, char **argv)
 {
     size_t total, used, free;
@@ -368,6 +319,51 @@ static int shell_parse_args(char *buf, char **argv, int max_args)
     return argc;
 }
 
+static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len)
+{
+    int offset = 0;
+
+    if (buf_len <= 0) {
+        return -1;
+    }
+
+    buf[0] = '\0';
+    for (int i = start; i < argc; i++) {
+        int arg_len = (int)libcm_strlen(argv[i]);
+
+        if (i > start) {
+            if (offset >= buf_len - 1) {
+                return -1;
+            }
+            buf[offset++] = ' ';
+        }
+
+        if (offset + arg_len >= buf_len) {
+            return -1;
+        }
+
+        libcm_memcpy(&buf[offset], argv[i], arg_len);
+        offset += arg_len;
+        buf[offset] = '\0';
+    }
+
+    return 0;
+}
+
+static const char* shell_path_basename(const char *path)
+{
+    const char *base = path;
+
+    while (*path) {
+        if (*path == '/') {
+            base = path + 1;
+        }
+        path++;
+    }
+
+    return base;
+}
+
 static int shell_exec_cmd(int argc, char **argv)
 {
     if (argc == 0) {
@@ -381,32 +377,39 @@ static int shell_exec_cmd(int argc, char **argv)
     }
     
     if (argv[0][0] == '/') {
-        int fd = pup_open(argv[0], O_RDONLY);
-        if (fd >= 0) {
-            pup_close(fd);
-            
-            void *app_data = NULL;
-            unsigned int app_size = 0;
-            
-            int ret = pup_romfs_get_file_data(argv[0], &app_data, &app_size);
-            if (ret == 0 && app_data != NULL && app_size > 0) {
-                PUP_PRINTK("Loading app from %s (%d bytes)...\n", argv[0], app_size);
-                
-                ret = app_load_from_flash(app_data, app_size);
-                if (ret == 0) {
-                    extern user_app_t loaded_app;
-                    PUP_PRINTK("Running app...\n");
-                    app_run_legacy(&loaded_app);
-                    PUP_PRINTK("App returned\n");
-                    return 0;
-                } else {
-                    PUP_PRINTK("Failed to load app\n");
-                    return -1;
-                }
-            } else {
-                PUP_PRINTK("File not found in ROMFS: %s\n", argv[0]);
+        const char *path = argv[0];
+        const char *app_name = shell_path_basename(path);
+        char arg_buf[APP_EXEC_ARG_AREA_SIZE];
+        const char *arg_ptr = PUP_NULL;
+        int wait = 1;
+        int arg_end = argc;
+        int result;
+
+        if (*app_name == '\0') {
+            PUP_PRINTK("Invalid executable path: %s\n", path);
+            return -1;
+        }
+
+        if (argc > 1 && libcm_strcmp(argv[argc - 1], "&") == 0) {
+            wait = 0;
+            arg_end = argc - 1;
+        }
+
+        if (arg_end > 1) {
+            if (shell_build_exec_arg(argv, 1, arg_end, arg_buf, sizeof(arg_buf)) != 0) {
+                PUP_PRINTK("Error: app arguments too long\n");
                 return -1;
             }
+            arg_ptr = arg_buf;
+        }
+
+        result = app_exec_with_arg(app_name, path, arg_ptr, wait);
+        if (result >= 0) {
+            if (wait) {
+                return result;
+            }
+            PUP_PRINTK("App '%s' started with pid=%d (running in background)\n", app_name, result);
+            return 0;
         }
     }
     

@@ -7,6 +7,7 @@
 #define PUP_SHELL_MAX_ARGS     8
 #define PUP_SHELL_PROMPT       "puppy> "
 #define PUP_SHELL_APP_ARG_LEN  256
+#define PUP_SHELL_HISTORY_MAX  5
 
 #define DT_UNKNOWN              0
 #define DT_DIR                  4
@@ -90,6 +91,13 @@ static const shell_cmd_t shell_cmds[] = {
 
 static char shell_buf[PUP_SHELL_MAX_CMD_LEN];
 static int shell_buf_pos = 0;
+static int shell_cursor_pos = 0;
+static char shell_history[PUP_SHELL_HISTORY_MAX][PUP_SHELL_MAX_CMD_LEN];
+static int shell_history_count = 0;
+static int shell_history_head = 0;
+static int shell_history_view = -1;
+static char shell_saved_buf[PUP_SHELL_MAX_CMD_LEN];
+static int shell_saved_buf_pos = 0;
 
 static void shell_putchar(char c)
 {
@@ -120,6 +128,160 @@ static int shell_getchar(void)
 static void shell_show_prompt(void)
 {
     shell_puts(PUP_SHELL_PROMPT);
+}
+
+static void shell_refresh_input(void)
+{
+    shell_puts("\r\033[K");
+    shell_show_prompt();
+    shell_puts(shell_buf);
+
+    for (int i = shell_cursor_pos; i < shell_buf_pos; i++) {
+        shell_putchar('\b');
+    }
+}
+
+static void shell_set_buffer(const char *text)
+{
+    int len = (int)strlen(text);
+
+    if (len >= PUP_SHELL_MAX_CMD_LEN) {
+        len = PUP_SHELL_MAX_CMD_LEN - 1;
+    }
+
+    memcpy(shell_buf, text, (size_t)len);
+    shell_buf[len] = '\0';
+    shell_buf_pos = len;
+    shell_cursor_pos = len;
+    shell_refresh_input();
+}
+
+static void shell_leave_history_view(void)
+{
+    shell_history_view = -1;
+    shell_saved_buf[0] = '\0';
+    shell_saved_buf_pos = 0;
+}
+
+static void shell_history_add(const char *line)
+{
+    int len;
+
+    if (!line || line[0] == '\0') {
+        return;
+    }
+
+    if (shell_history_count > 0) {
+        int last_index = (shell_history_head + PUP_SHELL_HISTORY_MAX - 1) % PUP_SHELL_HISTORY_MAX;
+        if (strcmp(shell_history[last_index], line) == 0) {
+            return;
+        }
+    }
+
+    len = (int)strlen(line);
+    if (len >= PUP_SHELL_MAX_CMD_LEN) {
+        len = PUP_SHELL_MAX_CMD_LEN - 1;
+    }
+
+    memcpy(shell_history[shell_history_head], line, (size_t)len);
+    shell_history[shell_history_head][len] = '\0';
+    shell_history_head = (shell_history_head + 1) % PUP_SHELL_HISTORY_MAX;
+    if (shell_history_count < PUP_SHELL_HISTORY_MAX) {
+        shell_history_count++;
+    }
+}
+
+static void shell_history_prev(void)
+{
+    int oldest;
+
+    if (shell_history_count == 0) {
+        return;
+    }
+
+    if (shell_history_view < 0) {
+        memcpy(shell_saved_buf, shell_buf, (size_t)shell_buf_pos);
+        shell_saved_buf[shell_buf_pos] = '\0';
+        shell_saved_buf_pos = shell_buf_pos;
+        shell_history_view = (shell_history_head + PUP_SHELL_HISTORY_MAX - 1) % PUP_SHELL_HISTORY_MAX;
+    } else {
+        oldest = (shell_history_head + PUP_SHELL_HISTORY_MAX - shell_history_count) % PUP_SHELL_HISTORY_MAX;
+        if (shell_history_view != oldest) {
+            shell_history_view = (shell_history_view + PUP_SHELL_HISTORY_MAX - 1) % PUP_SHELL_HISTORY_MAX;
+        }
+    }
+
+    shell_set_buffer(shell_history[shell_history_view]);
+}
+
+static void shell_history_browse_next(void)
+{
+    int newest;
+
+    if (shell_history_view < 0) {
+        return;
+    }
+
+    newest = (shell_history_head + PUP_SHELL_HISTORY_MAX - 1) % PUP_SHELL_HISTORY_MAX;
+    if (shell_history_view == newest) {
+        shell_history_view = -1;
+        shell_set_buffer(shell_saved_buf);
+        shell_buf_pos = shell_saved_buf_pos;
+        shell_cursor_pos = shell_saved_buf_pos;
+        return;
+    }
+
+    shell_history_view = (shell_history_view + 1) % PUP_SHELL_HISTORY_MAX;
+    shell_set_buffer(shell_history[shell_history_view]);
+}
+
+static void shell_insert_char(char ch)
+{
+    if (shell_buf_pos >= PUP_SHELL_MAX_CMD_LEN - 1) {
+        return;
+    }
+
+    if (shell_cursor_pos < shell_buf_pos) {
+        for (int i = shell_buf_pos; i >= shell_cursor_pos; i--) {
+            shell_buf[i + 1] = shell_buf[i];
+        }
+    }
+
+    shell_buf[shell_cursor_pos] = ch;
+    shell_buf_pos++;
+    shell_cursor_pos++;
+    shell_buf[shell_buf_pos] = '\0';
+    shell_refresh_input();
+}
+
+static void shell_backspace(void)
+{
+    if (shell_cursor_pos <= 0) {
+        return;
+    }
+
+    for (int i = shell_cursor_pos; i <= shell_buf_pos; i++) {
+        shell_buf[i - 1] = shell_buf[i];
+    }
+    shell_buf_pos--;
+    shell_cursor_pos--;
+    shell_refresh_input();
+}
+
+static void shell_move_cursor_left(void)
+{
+    if (shell_cursor_pos > 0) {
+        shell_cursor_pos--;
+        shell_refresh_input();
+    }
+}
+
+static void shell_move_cursor_right(void)
+{
+    if (shell_cursor_pos < shell_buf_pos) {
+        shell_cursor_pos++;
+        shell_refresh_input();
+    }
 }
 
 static int shell_cmd_help(int argc, char **argv)
@@ -433,11 +595,16 @@ static void shell_process_line(void)
     
     shell_buf[shell_buf_pos] = '\0';
     shell_puts("\n");
+
+    shell_history_add(shell_buf);
+    shell_leave_history_view();
     
     argc = shell_parse_args(shell_buf, argv, PUP_SHELL_MAX_ARGS);
     shell_exec_cmd(argc, argv);
     
     shell_buf_pos = 0;
+    shell_cursor_pos = 0;
+    shell_buf[0] = '\0';
     shell_show_prompt();
 }
 
@@ -457,20 +624,55 @@ void app_main(void)
             sched_yield();
             continue;
         }
+
+        if (ch == 0x1B) {
+            int ch1 = shell_getchar();
+            int ch2 = shell_getchar();
+
+            if (ch1 == '[') {
+                if (ch2 == 'A') {
+                    shell_history_prev();
+                    continue;
+                }
+                if (ch2 == 'B') {
+                    shell_history_browse_next();
+                    continue;
+                }
+                if (ch2 == 'C') {
+                    if (shell_history_view >= 0) {
+                        shell_leave_history_view();
+                    }
+                    shell_move_cursor_right();
+                    continue;
+                }
+                if (ch2 == 'D') {
+                    if (shell_history_view >= 0) {
+                        shell_leave_history_view();
+                    }
+                    shell_move_cursor_left();
+                    continue;
+                }
+            }
+            continue;
+        }
         
         if (ch == '\r' || ch == '\n') {
             shell_process_line();
         }
         else if (ch == 0x7F || ch == '\b') {
-            if (shell_buf_pos > 0) {
-                shell_buf_pos--;
-                shell_puts("\b \b");
+            if (shell_cursor_pos > 0) {
+                if (shell_history_view >= 0) {
+                    shell_leave_history_view();
+                }
+                shell_backspace();
             }
         }
         else if (ch >= 0x20 && ch < 0x7F) {
             if (shell_buf_pos < PUP_SHELL_MAX_CMD_LEN - 1) {
-                shell_buf[shell_buf_pos++] = (char)ch;
-                shell_putchar((char)ch);
+                if (shell_history_view >= 0) {
+                    shell_leave_history_view();
+                }
+                shell_insert_char((char)ch);
             }
         }
     }

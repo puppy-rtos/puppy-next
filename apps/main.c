@@ -84,7 +84,6 @@ void *puppy_main_thread(void *arg) {
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Mounting romfs at /rom");
     if (pup_fs_mount(PUP_NULL, "/rom", "rom", 0, (const void *)PUP_MOUNT_ROMFS_BASE) == 0) {
         PUP_LOG_INFO(PUP_LOG_MODULE_FS, "romfs mounted successfully");
-        test_romfs_auto_run();
     } else {
         PUP_LOG_ERROR(PUP_LOG_MODULE_FS, "romfs mount failed");
     }

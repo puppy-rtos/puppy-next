@@ -358,6 +358,20 @@ static int shell_parse_args(char *buf, char **argv, int max_args)
     return argc;
 }
 
+static const char* shell_path_basename(const char *path)
+{
+    const char *base = path;
+
+    while (*path) {
+        if (*path == '/') {
+            base = path + 1;
+        }
+        path++;
+    }
+
+    return base;
+}
+
 static int shell_exec_cmd(int argc, char **argv)
 {
     if (argc == 0) {
@@ -367,6 +381,22 @@ static int shell_exec_cmd(int argc, char **argv)
     for (unsigned int i = 0; i < SHELL_CMD_NUM; i++) {
         if (strcmp(argv[0], shell_cmds[i].name) == 0) {
             return shell_cmds[i].func(argc, argv);
+        }
+    }
+
+    if (argv[0][0] == '/') {
+        const char *path = argv[0];
+        const char *app_name = shell_path_basename(path);
+        int exit_code;
+
+        if (*app_name == '\0') {
+            printf("Invalid executable path: %s\n", path);
+            return -1;
+        }
+
+        exit_code = user_execve(path, app_name, 1);
+        if (exit_code >= 0) {
+            return exit_code;
         }
     }
     

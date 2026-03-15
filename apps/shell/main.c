@@ -1,7 +1,6 @@
 #include "libc.h"
 #include "syscall.h"
 #include "fs.h"
-#include "app_header.h"
 
 #define PUP_SHELL_MAX_CMD_LEN  128
 #define PUP_SHELL_MAX_ARGS     8
@@ -21,39 +20,6 @@ struct dirent {
     unsigned char d_namlen;
     unsigned short d_reclen;
     char d_name[256];
-};
-
-extern void app_main(void);
-extern char _sstack;
-extern int __text_start__;
-extern int __got_start__;
-extern int __got_end__;
-extern int __rel_start__;
-extern int __rel_end__;
-extern int __data_start__;
-extern int __data_end__;
-extern int __data_load__;
-extern int __bss_start__;
-extern int __bss_end__;
-
-__attribute__((section(".app_header")))
-app_header_t app_header = {
-    .magic = APP_HEADER_MAGIC,
-    .load_addr = 0x08080000,
-    .entry_addr = (unsigned int)app_main,
-    .app_size = 0,
-    .version = 0x00010000,
-    .stack_addr = (unsigned int)&_sstack,
-    .got_start = (unsigned int)&__got_start__,
-    .got_end = (unsigned int)&__got_end__,
-    .text_start = (unsigned int)&__text_start__,
-    .rel_start = (unsigned int)&__rel_start__,
-    .rel_end = (unsigned int)&__rel_end__,
-    .data_start = (unsigned int)&__data_start__,
-    .data_end = (unsigned int)&__data_end__,
-    .data_load = (unsigned int)&__data_load__,
-    .bss_start = (unsigned int)&__bss_start__,
-    .bss_end = (unsigned int)&__bss_end__,
 };
 
 typedef int (*shell_cmd_func)(int argc, char **argv);
@@ -581,6 +547,13 @@ static int shell_exec_cmd(int argc, char **argv)
             printf("App '%s' started with pid=%d (running in background)\n", app_name, result);
             return 0;
         }
+
+        /*
+         * Absolute path means the user explicitly tried to execute an app.
+         * Do not fall through to "Unknown command" on runtime failures.
+         */
+        printf("App execution failed: %s (ret=%d)\n", path, result);
+        return result;
     }
     
     printf("Unknown command: %s\n", argv[0]);

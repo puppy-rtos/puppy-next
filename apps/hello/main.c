@@ -1,39 +1,5 @@
 #include "libc.h"
 #include "syscall.h"
-#include "app_header.h"
-
-extern void app_main(const char* arg);
-extern char _sstack;
-extern int __text_start__;
-extern int __got_start__;
-extern int __got_end__;
-extern int __rel_start__;
-extern int __rel_end__;
-extern int __data_start__;
-extern int __data_end__;
-extern int __data_load__;
-extern int __bss_start__;
-extern int __bss_end__;
-
-__attribute__((section(".app_header")))
-app_header_t app_header = {
-    .magic = APP_HEADER_MAGIC,
-    .load_addr = 0x08080000,
-    .entry_addr = (unsigned int)app_main,
-    .app_size = 0,
-    .version = 0x00010000,
-    .stack_addr = (unsigned int)&_sstack,
-    .got_start = (unsigned int)&__got_start__,
-    .got_end = (unsigned int)&__got_end__,
-    .text_start = (unsigned int)&__text_start__,
-    .rel_start = (unsigned int)&__rel_start__,
-    .rel_end = (unsigned int)&__rel_end__,
-    .data_start = (unsigned int)&__data_start__,
-    .data_end = (unsigned int)&__data_end__,
-    .data_load = (unsigned int)&__data_load__,
-    .bss_start = (unsigned int)&__bss_start__,
-    .bss_end = (unsigned int)&__bss_end__
-};
 
 static inline int get_cpu_mode(void) {
     volatile int tmp = 0;
@@ -73,12 +39,7 @@ static __attribute__((unused)) void test_invalid_memory_access(void) {
     printf("\n=== MPU Protection Test ===\n");
     
     volatile int* kernel_ram = (volatile int*)0x20000000;
-    volatile int* user_ram = (volatile int*)0x20010000;
-    
-    printf("[MPU Test] Testing valid user RAM access...\n");
-    *user_ram = 0x12345678;
-    printf("[MPU Test] User RAM write: 0x%08x\n", *user_ram);
-    
+
     printf("[MPU Test] Testing invalid kernel RAM access...\n");
     printf("[MPU Test] This should trigger a MemManage fault\n");
     *kernel_ram = 0xDEADBEEF;
@@ -147,9 +108,9 @@ void app_main(const char* arg) {
         pthread_join(tid2, NULL);
     }
 
-    // printf("=== Thread Test Complete ===\n");
+    printf("=== Thread Test Complete ===\n");
     
-    // test_invalid_memory_access();
+    test_invalid_memory_access();
     
     pthread_exit((void*)0);
 }

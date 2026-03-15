@@ -93,6 +93,7 @@ function define_user_app_target(target_name, app_source, output_bin_name)
 
         add_files(
             app_source,
+            "apps/runtime/app_bootstrap.c",
             "apps/runtime/libc.c",
             "apps/runtime/syscall.S"
         )

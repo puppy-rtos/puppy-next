@@ -70,6 +70,7 @@ static int shell_cmd_cat(int argc, char **argv);
 static int shell_cmd_echo(int argc, char **argv);
 static int shell_cmd_clear(int argc, char **argv);
 static int shell_cmd_apps(int argc, char **argv);
+static int shell_cmd_free(int argc, char **argv);
 static int shell_cmd_exit(int argc, char **argv);
 static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len);
 
@@ -77,11 +78,12 @@ static const shell_cmd_t shell_cmds[] = {
     {"help",  "Show available commands", shell_cmd_help},
     {"ps",    "List all threads", shell_cmd_ps},
     {"ls",    "List directory (usage: ls [path])", shell_cmd_ls},
-    {"cat",   "Read from device (usage: cat <device>)", shell_cmd_cat},
-    {"echo",  "Write to device (usage: echo <text> > <device>)", shell_cmd_echo},
+    {"cat",   "Read from file (usage: cat <file>)", shell_cmd_cat},
+    {"echo",  "Write to file (usage: echo <text> > <file>)", shell_cmd_echo},
     {"clear", "Clear screen", shell_cmd_clear},
     {"apps",  "List running apps", shell_cmd_apps},
-    {"exit",  "Exit user shell and return to kernel shell", shell_cmd_exit},
+    {"free",  "Show heap usage", shell_cmd_free},
+    {"exit",  "Exit user shell", shell_cmd_exit},
 };
 
 #define SHELL_CMD_NUM (sizeof(shell_cmds) / sizeof(shell_cmds[0]))
@@ -175,8 +177,8 @@ static int shell_cmd_ls(int argc, char **argv)
 static int shell_cmd_cat(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: cat <device>\n");
-        printf("Example: cat /dev/uart0\n");
+        printf("Usage: cat <file>\n");
+        printf("Example: cat /etc/config.txt\n");
         return -1;
     }
     
@@ -214,8 +216,8 @@ static int shell_cmd_cat(int argc, char **argv)
 static int shell_cmd_echo(int argc, char **argv)
 {
     if (argc < 4) {
-        printf("Usage: echo <text> > <device>\n");
-        printf("Example: echo hello > /dev/uart0\n");
+        printf("Usage: echo <text> > <file>\n");
+        printf("Example: echo hello > /etc/config.txt\n");
         return -1;
     }
     
@@ -229,15 +231,15 @@ static int shell_cmd_echo(int argc, char **argv)
     
     if (redirect_pos < 0 || redirect_pos >= argc - 1) {
         printf("Error: Missing redirect target\n");
-        printf("Usage: echo <text> > <device>\n");
+        printf("Usage: echo <text> > <file>\n");
         return -1;
     }
     
-    const char *device = argv[redirect_pos + 1];
+    const char *file = argv[redirect_pos + 1];
     
-    int fd = user_open(device, 0x0002);
+    int fd = user_open(file, 0x0002);
     if (fd < 0) {
-        printf("Error: Cannot open %s (fd=%d)\n", device, fd);
+        printf("Error: Cannot open %s (fd=%d)\n", file, fd);
         return -1;
     }
     
@@ -249,7 +251,7 @@ static int shell_cmd_echo(int argc, char **argv)
     }
     user_fs_write(fd, "\n", 1);
     
-    printf("Written to %s\n", device);
+    printf("Written to %s\n", file);
     user_close(fd);
     return 0;
 }
@@ -263,6 +265,29 @@ static int shell_cmd_clear(int argc, char **argv)
 static int shell_cmd_apps(int argc, char **argv)
 {
     return user_apps();
+}
+
+static int shell_cmd_free(int argc, char **argv)
+{
+    pup_heap_info_t info;
+
+    if (user_free(&info) < 0) {
+        printf("Error: failed to query heap usage\n");
+        return -1;
+    }
+
+    printf("Kernel Heap Usage:\n");
+    printf("  Total: %u bytes (%u KB)\n", info.kernel_total, info.kernel_total / 1024);
+    printf("  Used:  %u bytes (%u KB)\n", info.kernel_used, info.kernel_used / 1024);
+    printf("  Free:  %u bytes (%u KB)\n", info.kernel_free, info.kernel_free / 1024);
+    printf("  Peak:  %u bytes (%u KB)\n", info.kernel_peak, info.kernel_peak / 1024);
+    printf("User App Heap Usage:\n");
+    printf("  Total: %u bytes (%u KB)\n", info.user_total, info.user_total / 1024);
+    printf("  Used:  %u bytes (%u KB)\n", info.user_used, info.user_used / 1024);
+    printf("  Free:  %u bytes (%u KB)\n", info.user_free, info.user_free / 1024);
+    printf("  Peak:  %u bytes (%u KB)\n", info.user_peak, info.user_peak / 1024);
+
+    return 0;
 }
 
 static int shell_cmd_exit(int argc, char **argv)

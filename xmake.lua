@@ -88,7 +88,7 @@ function define_user_app_target(target_name, app_source, output_bin_name)
         add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
         add_ldflags(' -T ' .. os.scriptdir() .. '/user_apps/linker/app.lds')
 
-        add_includedirs("user_apps/include")
+        add_includedirs("user_apps/include", "core")
 
         add_files(
             app_source,

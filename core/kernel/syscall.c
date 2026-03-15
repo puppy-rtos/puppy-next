@@ -7,6 +7,7 @@
 #include "mpu.h"
 #include "pup_fs.h"
 #include "pup_console.h"
+#include "kheap.h"
 
 void syscall_uart_rx_init(void)
 {
@@ -372,6 +373,25 @@ static long sys_tick_get(long arg1, long arg2, long arg3, long arg4) {
     return (long)pup_tick_get();
 }
 
+static long sys_free(long arg1, long arg2, long arg3, long arg4) {
+    pup_heap_info_t* info = (pup_heap_info_t*)arg1;
+
+    if (!info) {
+        return -1;
+    }
+
+    info->kernel_total = (unsigned int)kheap_total_size();
+    info->kernel_used = (unsigned int)kheap_used_size();
+    info->kernel_free = (unsigned int)kheap_free_size();
+    info->kernel_peak = (unsigned int)kheap_peak_used_size();
+    info->user_total = (unsigned int)kheap_user_total_size();
+    info->user_used = (unsigned int)kheap_user_used_size();
+    info->user_free = (unsigned int)kheap_user_free_size();
+    info->user_peak = (unsigned int)kheap_user_peak_used_size();
+
+    return 0;
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -390,6 +410,7 @@ static const syscall_func_t syscall_table[] = {
     [SYS_DELAY] = sys_delay,
     [SYS_APPS] = sys_apps,
     [SYS_TICK_GET] = sys_tick_get,
+    [SYS_FREE] = sys_free,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

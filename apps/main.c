@@ -90,11 +90,9 @@ void *puppy_main_thread(void *arg) {
     
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "File system initialized");
 
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting kernel shell");
-    extern int puppy_shell_start(void);
-    if (puppy_shell_start() != 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start kernel shell task");
-        return (void*)-1;
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting user shell");
+    if (app_exec("shell", "/rom/shell", 0) < 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start user shell");
     }
 
     /* Keep main thread alive and periodically reap zombie threads. */

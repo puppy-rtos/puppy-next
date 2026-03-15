@@ -851,6 +851,7 @@ int sched_yield(void) {
     PUP_ASSERT(pup_cpu_self()->curr_thread != PUP_NULL);
     PUP_ASSERT(_thread->state == PUP_THREAD_STATE_RUN);
 
+    _thread->state = PUP_THREAD_STATE_INIT;
     pup_sched_ready_insert(_thread);
     pup_sched();
 

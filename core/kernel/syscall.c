@@ -18,6 +18,8 @@ void syscall_uart_rx_init(void)
 typedef struct {
     pthread_t thread;
     int used;
+    int exited;
+    sem_t exit_sem;
     void* (*entry)(void*);
     void* arg;
     char* stack;
@@ -25,6 +27,13 @@ typedef struct {
 } user_thread_t;
 
 static user_thread_t user_threads[MAX_USER_THREADS];
+
+static void sys_exit_no_return(void) __attribute__((noreturn));
+
+static void sys_exit_no_return(void) {
+    while (1) {
+    }
+}
 
 static long sys_write(long arg1, long arg2, long arg3, long arg4) {
     int fd = (int)arg1;
@@ -75,7 +84,8 @@ static long sys_exit(long arg1, long arg2, long arg3, long arg4) {
     pthread_t self = pthread_self();
     for (int i = 0; i < MAX_USER_THREADS; i++) {
         if (user_threads[i].thread == self) {
-            user_threads[i].used = 0;
+            user_threads[i].exited = 1;
+            sem_post(&user_threads[i].exit_sem);
             break;
         }
     }
@@ -90,7 +100,13 @@ static long sys_exit(long arg1, long arg2, long arg3, long arg4) {
     }
     
     pthread_exit((void*)exit_code);
-    return 0;
+
+    /*
+     * User-thread exit must not return through the syscall trampoline.
+     * If a dead thread falls back into user_thread_entry it will hit the
+     * post-SVC spin loop and stall the system.
+     */
+    sys_exit_no_return();
 }
 
 static long sys_yield(long arg1, long arg2, long arg3, long arg4) {
@@ -153,6 +169,8 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: using slot %d", i);
     
     user_threads[i].used = 1;
+    user_threads[i].exited = 0;
+    sem_init(&user_threads[i].exit_sem, 0, 0);
     user_threads[i].entry = entry;
     user_threads[i].arg = thread_arg;
     user_threads[i].stack = stackaddr;
@@ -170,6 +188,9 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     
     if (ret != 0) {
         user_threads[i].used = 0;
+        user_threads[i].exited = 0;
+        sem_destroy(&user_threads[i].exit_sem);
+        user_threads[i].thread = PUP_NULL;
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_thread_create failed: %d", ret);
         return -1;
     }
@@ -180,6 +201,8 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
 
 static long sys_thread_join(long arg1, long arg2, long arg3, long arg4) {
     int thread_id = (int)arg1;
+    pthread_t thread;
+    int ret;
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: thread_id=%d", thread_id);
 
@@ -188,17 +211,31 @@ static long sys_thread_join(long arg1, long arg2, long arg3, long arg4) {
         return -1;
     }
 
-    if (!user_threads[thread_id].used) {
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: thread %d already exited", thread_id);
+    if (!user_threads[thread_id].used || user_threads[thread_id].thread == PUP_NULL) {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: thread %d already reclaimed", thread_id);
         return 0;
     }
 
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: calling pthread_join for thread %d", thread_id);
-    int ret = pthread_join(user_threads[thread_id].thread, NULL);
+    thread = user_threads[thread_id].thread;
+
+    if (!user_threads[thread_id].exited) {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: wait exit_sem for thread %d", thread_id);
+        sem_wait(&user_threads[thread_id].exit_sem);
+    }
+
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: reclaim thread %d", thread_id);
+    ret = pthread_join(thread, NULL);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: pthread_join returned %d", ret);
 
     if (ret == 0) {
         user_threads[thread_id].used = 0;
+        user_threads[thread_id].exited = 0;
+        sem_destroy(&user_threads[thread_id].exit_sem);
+        user_threads[thread_id].thread = PUP_NULL;
+        user_threads[thread_id].entry = PUP_NULL;
+        user_threads[thread_id].arg = PUP_NULL;
+        user_threads[thread_id].stack = PUP_NULL;
+        user_threads[thread_id].got_base = 0;
     }
     return ret;
 }

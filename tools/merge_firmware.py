@@ -81,14 +81,17 @@ def write_binary(filepath, data):
     with open(filepath, "wb") as f:
         f.write(data)
 
-
 def create_romfs(apps_dir, output_file):
     apps = []
-    bin_files = glob.glob(os.path.join(apps_dir, "*_app.bin"))
+    excluded_bins = {"puppy.bin", "romfs.bin", "firmware.bin"}
+    bin_files = [
+        p for p in glob.glob(os.path.join(apps_dir, "*.bin"))
+        if os.path.basename(p) not in excluded_bins
+    ]
 
     if not bin_files:
         print(f"No application binaries found in {apps_dir}")
-        print("Looking for *_app.bin files")
+        print("Looking for app .bin files (excluding puppy.bin, romfs.bin, firmware.bin)")
         return None
 
     for bin_file in sorted(bin_files):

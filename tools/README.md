@@ -4,7 +4,7 @@ This directory contains repository maintenance and runtime helper scripts.
 
 ## Packaging
 
-- `merge_firmware.py`: build ROMFS from `output/*_app.bin` and merge with kernel image into `output/firmware.bin`.
+- `merge_firmware.py`: build ROMFS from app binaries in `output/*.bin` (excluding `puppy.bin`, `romfs.bin`, `firmware.bin`) and merge with kernel image into `output/firmware.bin`.
 
 ## QEMU Launchers
 

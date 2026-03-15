@@ -289,9 +289,10 @@ static long sys_execve(long arg1, long arg2, long arg3, long arg4) {
     const char* path = (const char*)arg1;
     const char* name = (const char*)arg2;
     int wait = (int)arg3;
+    const char* app_arg = (const char*)arg4;
     
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_execve: path=%s, name=%s, wait=%d", 
-                  path, name ? name : "NULL", wait);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_execve: path=%s, name=%s, wait=%d, has_arg=%d", 
+                  path, name ? name : "NULL", wait, (app_arg && app_arg[0]) ? 1 : 0);
     
     if (!path) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_execve: path is NULL");
@@ -299,8 +300,13 @@ static long sys_execve(long arg1, long arg2, long arg3, long arg4) {
     }
     
     const char* app_name = name ? name : path;
-    
-    int result = app_exec(app_name, path, wait);
+
+    int result;
+    if (app_arg && app_arg[0] != '\0') {
+        result = app_exec_with_arg(app_name, path, app_arg, wait);
+    } else {
+        result = app_exec(app_name, path, wait);
+    }
     if (result < 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_execve: failed to exec app");
         return -1;

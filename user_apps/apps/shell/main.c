@@ -6,6 +6,7 @@
 #define PUP_SHELL_MAX_CMD_LEN  128
 #define PUP_SHELL_MAX_ARGS     8
 #define PUP_SHELL_PROMPT       "puppy> "
+#define PUP_SHELL_APP_ARG_LEN  256
 
 #define DT_UNKNOWN              0
 #define DT_DIR                  4
@@ -72,6 +73,7 @@ static int shell_cmd_run(int argc, char **argv);
 static int shell_cmd_runw(int argc, char **argv);
 static int shell_cmd_apps(int argc, char **argv);
 static int shell_cmd_exit(int argc, char **argv);
+static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len);
 
 static const shell_cmd_t shell_cmds[] = {
     {"help",  "Show available commands", shell_cmd_help},
@@ -273,13 +275,23 @@ static int shell_cmd_run(int argc, char **argv)
     
     const char* app_name = argv[1];
     char path[64];
+    char app_arg[PUP_SHELL_APP_ARG_LEN];
+    const char *arg_ptr = 0;
     
     snprintf(path, sizeof(path), "/rom/%s", app_name);
+
+    if (argc > 2) {
+        if (shell_build_exec_arg(argv, 2, argc, app_arg, sizeof(app_arg)) != 0) {
+            printf("Error: app arguments too long\n");
+            return -1;
+        }
+        arg_ptr = app_arg;
+    }
     
     printf("Running app: %s\n", app_name);
     printf("Path: %s\n", path);
     
-    int pid = user_execve(path, app_name, 0);
+    int pid = user_execve_with_arg(path, app_name, arg_ptr, 0);
     if (pid < 0) {
         printf("Error: Failed to run app '%s' (ret=%d)\n", app_name, pid);
         return -1;
@@ -300,13 +312,23 @@ static int shell_cmd_runw(int argc, char **argv)
     
     const char* app_name = argv[1];
     char path[64];
+    char app_arg[PUP_SHELL_APP_ARG_LEN];
+    const char *arg_ptr = 0;
     
     snprintf(path, sizeof(path), "/rom/%s", app_name);
+
+    if (argc > 2) {
+        if (shell_build_exec_arg(argv, 2, argc, app_arg, sizeof(app_arg)) != 0) {
+            printf("Error: app arguments too long\n");
+            return -1;
+        }
+        arg_ptr = app_arg;
+    }
     
     printf("Running app: %s (waiting for completion)\n", app_name);
     printf("Path: %s\n", path);
     
-    int exit_code = user_execve(path, app_name, 1);
+    int exit_code = user_execve_with_arg(path, app_name, arg_ptr, 1);
     if (exit_code < 0) {
         printf("Error: Failed to run app '%s' (ret=%d)\n", app_name, exit_code);
         return -1;
@@ -358,6 +380,37 @@ static int shell_parse_args(char *buf, char **argv, int max_args)
     return argc;
 }
 
+static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len)
+{
+    int offset = 0;
+
+    if (buf_len <= 0) {
+        return -1;
+    }
+
+    buf[0] = '\0';
+    for (int i = start; i < argc; i++) {
+        int len = (int)strlen(argv[i]);
+
+        if (i > start) {
+            if (offset >= buf_len - 1) {
+                return -1;
+            }
+            buf[offset++] = ' ';
+        }
+
+        if (offset + len >= buf_len) {
+            return -1;
+        }
+
+        memcpy(&buf[offset], argv[i], (size_t)len);
+        offset += len;
+        buf[offset] = '\0';
+    }
+
+    return 0;
+}
+
 static const char* shell_path_basename(const char *path)
 {
     const char *base = path;
@@ -387,6 +440,8 @@ static int shell_exec_cmd(int argc, char **argv)
     if (argv[0][0] == '/') {
         const char *path = argv[0];
         const char *app_name = shell_path_basename(path);
+        char app_arg[PUP_SHELL_APP_ARG_LEN];
+        const char *arg_ptr = 0;
         int exit_code;
 
         if (*app_name == '\0') {
@@ -394,7 +449,15 @@ static int shell_exec_cmd(int argc, char **argv)
             return -1;
         }
 
-        exit_code = user_execve(path, app_name, 1);
+        if (argc > 1) {
+            if (shell_build_exec_arg(argv, 1, argc, app_arg, sizeof(app_arg)) != 0) {
+                printf("Error: app arguments too long\n");
+                return -1;
+            }
+            arg_ptr = app_arg;
+        }
+
+        exit_code = user_execve_with_arg(path, app_name, arg_ptr, 1);
         if (exit_code >= 0) {
             return exit_code;
         }

@@ -84,8 +84,12 @@ static inline int user_ps(void) {
     return (int)syscall(SYS_PS, 0, 0, 0, 0);
 }
 
+static inline int user_execve_with_arg(const char* path, const char* name, const char* arg, int wait) {
+    return (int)syscall(SYS_EXECVE, (long)path, (long)name, wait, (long)arg);
+}
+
 static inline int user_execve(const char* path, const char* name, int wait) {
-    return (int)syscall(SYS_EXECVE, (long)path, (long)name, wait, 0);
+    return user_execve_with_arg(path, name, 0, wait);
 }
 
 static inline int user_waitpid(int pid, int* status) {

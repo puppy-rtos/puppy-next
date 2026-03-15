@@ -673,6 +673,31 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .enr_bit = 1 << 8,    // TIM14 时钟使能位
         .enabled = 0,
     },
+    /* SPI 时钟节点 */
+    [CLK_SPI1] = {
+        .name = "spi1",
+        .parent = CLK_PCLK2,
+        .ops = &peri_clk_ops,
+        .enr_reg = &RCC->APB2ENR,
+        .enr_bit = 1 << 12,   // SPI1 时钟使能位
+        .enabled = 0,
+    },
+    [CLK_SPI2] = {
+        .name = "spi2",
+        .parent = CLK_PCLK1,
+        .ops = &peri_clk_ops,
+        .enr_reg = &RCC->APB1ENR,
+        .enr_bit = 1 << 14,   // SPI2 时钟使能位
+        .enabled = 0,
+    },
+    [CLK_SPI3] = {
+        .name = "spi3",
+        .parent = CLK_PCLK1,
+        .ops = &peri_clk_ops,
+        .enr_reg = &RCC->APB1ENR,
+        .enr_bit = 1 << 15,   // SPI3 时钟使能位
+        .enabled = 0,
+    },
 };
 
 /* 全局时钟变量（保持向后兼容） */

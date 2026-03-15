@@ -30,7 +30,7 @@ target("stm32f407-dtm")
     add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -O0  -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=dtm.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds', {force = true})
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=0x08000000 -Wl,--defsym,DTM_RAM_BASE=0x20000000')
 
     -- 包含路径
@@ -62,7 +62,7 @@ target("stm32f412-dtm")
     add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -O0  -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=dtm.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds', {force = true})
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=0x08000000 -Wl,--defsym,DTM_RAM_BASE=0x20000000')
 
     -- 包含路径
@@ -94,7 +94,7 @@ target("stm32h750-dtm")
     add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -O0  -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=dtm.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds', {force = true})
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=0x08000000 -Wl,--defsym,DTM_RAM_BASE=0x20000000')
 
     -- 包含路径
@@ -127,7 +127,7 @@ target("gd32h759-dtm")
     add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -O0  -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=dtm.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds', {force = true})
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=0x08000000 -Wl,--defsym,DTM_RAM_BASE=0x24000000')
     
     -- 包含路径
@@ -159,7 +159,7 @@ target("gd32f427-dtm")
     add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -O0  -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -gdwarf-2 -g -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=dtm.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/link.lds', {force = true})
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=0x08000000 -Wl,--defsym,DTM_RAM_BASE=0x20000000')
 
     -- 包含路径

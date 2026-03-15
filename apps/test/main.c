@@ -1,5 +1,6 @@
 #include "libc.h"
 #include "syscall.h"
+#include "shared/pup_spi.h"
 
 #define O_RDONLY    0000000
 #define O_WRONLY    0000001
@@ -430,6 +431,58 @@ static int test_sem(void)
     return 0;
 }
 
+static int test_spi_flash_id(void)
+{
+    int fd;
+    int ret;
+    pup_spi_slave_config_t slave;
+    pup_spi_transfer_t xfer;
+    uint8_t tx[4] = {0x9F, 0xFF, 0xFF, 0xFF};
+    uint8_t rx[4] = {0};
+
+    printf("\n=== SPI Flash ID Test ===\n");
+
+    fd = open("/dev/spi2", O_RDWR);
+    if (fd < 0) {
+        printf("Failed to open /dev/spi2, fd=%d\n", fd);
+        return -1;
+    }
+
+    memset(&slave, 0, sizeof(slave));
+    strcpy(slave.name, "flash0");
+    slave.cs_id = PUP_SPI2_CS0;
+    slave.mode = 0;
+    slave.datasize = 0;
+    slave.baudrate_prescaler = 2;
+    slave.firstbit = 0;
+
+    ret = ioctl(fd, PUP_SPI_IOCTL_REGISTER_SLAVE, &slave);
+    if (ret != 0) {
+        printf("Register SPI slave failed, ret=%d\n", ret);
+        close(fd);
+        return -1;
+    }
+
+    memset(&xfer, 0, sizeof(xfer));
+    xfer.slave_id = slave.slave_id;
+    xfer.tx_buf = tx;
+    xfer.rx_buf = rx;
+    xfer.len = sizeof(tx);
+
+    ret = ioctl(fd, PUP_SPI_IOCTL_TRANSFER, &xfer);
+    if (ret != 0) {
+        printf("SPI transfer failed, ret=%d\n", ret);
+        close(fd);
+        return -1;
+    }
+
+    printf("JEDEC ID: %02X %02X %02X (len=%lu)\n",
+           rx[1], rx[2], rx[3], xfer.actual_len);
+
+    close(fd);
+    return 0;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -439,6 +492,7 @@ static const test_cmd_t test_cmds[] = {
     {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
     {"key", "Read PC5 key0 status for 5 seconds", test_key0},
     {"sem", "Test named semaphore wait/post/close", test_sem},
+    {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

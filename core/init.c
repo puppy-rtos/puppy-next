@@ -14,14 +14,13 @@
 #include "pup_romfs.h"
 #include "dev_uart.h"
 #include "dev_gpio.h"
+#include "dev_spi.h"
 #include "dtm_pmctrl.h"
 #include "dtm_flash.h"
 #include "app_loader.h"
 #include "puppy_log.h"
 #include "syscall.h"
 #include "pup_console.h"
-
-extern void test_romfs_auto_run(void);
 
 int libcm_console_output(const char *str, int len)
 {
@@ -70,6 +69,7 @@ void *puppy_main_thread(void *arg) {
     PUP_LOG_INFO(PUP_LOG_MODULE_DEV, "Registering devices");
     dev_uart_init();
     dev_gpio_init();
+    dev_spi_init();
 
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Registering romfs");
     pup_romfs_init();

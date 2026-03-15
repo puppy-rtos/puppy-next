@@ -92,6 +92,17 @@
 #define DTM_TIM14_CLK_EN      (1 << 8)   // TIM14 clock enable
 #define DTM_TIM2_IRQn         28          // TIM2_IRQn
 
+/* SPI IP Description */
+#define DTM_BINFDING_SPI_ARM_M4_ST_GD
+#define DTM_SPI_BASE          0x40013000UL // SPI base address
+#define DTM_SPI1_BASE         (DTM_SPI_BASE + 0x0000) // SPI1 base address
+#define DTM_SPI2_BASE         0x40003800UL // SPI2 base address
+#define DTM_SPI3_BASE         0x40003C00UL // SPI3 base address
+// SPI Clk Definitions
+#define DTM_SPI1_CLK_EN       (1 << 12)  // SPI1 clock enable
+#define DTM_SPI2_CLK_EN       (1 << 14)  // SPI2 clock enable
+#define DTM_SPI3_CLK_EN       (1 << 15)  // SPI3 clock enable
+
 /*
  * 3. IP Configuration
  */

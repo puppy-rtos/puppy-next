@@ -57,6 +57,10 @@ enum clk_id {
     CLK_TIM12,
     CLK_TIM13,
     CLK_TIM14,
+    /* SPI 时钟 */
+    CLK_SPI1,
+    CLK_SPI2,
+    CLK_SPI3,
     CLK_COUNT /* 时钟总数 */
 };
 

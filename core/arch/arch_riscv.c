@@ -5,6 +5,7 @@
  */
 
 #include <puppy_core.h>
+#include "kheap.h"
 #ifdef PUP_ARCH_RISCV
 __attribute__((always_inline)) inline pup_base_t arch_irq_lock(void) {
     pup_base_t key;
@@ -111,13 +112,20 @@ void* arch_new_thread(void* entry,
                       void* param1,
                       void* param2,
                       void* stack_addr,
-                      pup_uint32_t stack_size) {
+                      pup_uint32_t stack_size,
+                      pup_uint8_t use_kernel_stack) {
     int i;
     struct arch_thread* arch_data;
     _sf_t* sf;
 
-    arch_data = (struct arch_thread*)PUP_ALIGN_DOWN(((pup_uint32_t)stack_addr + stack_size) - sizeof(struct arch_thread), 8);
-    sf = (_sf_t*)PUP_ALIGN_DOWN((pup_uint32_t)arch_data - sizeof(_sf_t), 8);
+    PUP_UNUSED(use_kernel_stack);
+
+    arch_data = (struct arch_thread*)kheap_calloc(1, sizeof(struct arch_thread));
+    if (!arch_data) {
+        return PUP_NULL;
+    }
+
+    sf = (_sf_t*)PUP_ALIGN_DOWN(((pup_uint32_t)stack_addr + stack_size) - sizeof(_sf_t), 8);
 
     /* init all register */
     for (i = 0; i < sizeof(_sf_t) / sizeof(pup_uint32_t); i++) {
@@ -133,6 +141,24 @@ void* arch_new_thread(void* entry,
 
     arch_data->stack_ptr = ((pup_uint32_t)sf);
     return arch_data;
+}
+
+void arch_delete_thread(void* arch_data) {
+    if (!arch_data) {
+        return;
+    }
+
+    kheap_free(arch_data);
+}
+
+void* arch_thread_get_kernel_stackaddr(void* arch_data) {
+    PUP_UNUSED(arch_data);
+    return PUP_NULL;
+}
+
+pup_size_t arch_thread_get_kernel_stacksize(void* arch_data) {
+    PUP_UNUSED(arch_data);
+    return 0;
 }
 __attribute__((naked)) void riscv_swap(pup_ubase_t from, pup_ubase_t to);
 

@@ -8,6 +8,7 @@
 #include <string.h>
 #include "puppy_log.h"
 #include "kheap.h"
+#include "app_manager.h"
 
 #ifdef PUP_DEBUG
 #define PUP_SCHED_GUARD_ENABLED 1
@@ -39,6 +40,7 @@ const pthread_attr_t pthread_default_attr = {
     PUP_SCHED_PRIO_DEFAULT,
     PTHREAD_CREATE_JOINABLE, /* detach state */
     0,
+    0,
     PUP_CONFIG_PTHREAD_STACK_DEFAULT,
 };
 
@@ -54,6 +56,8 @@ struct _pthread_obj {
     void* param;
     void* stackaddr;      /* Address of memory to be used as stack */
     pup_size_t stacksize; /* Size of the stack allocated for the pthread */
+    void* kernel_stackaddr;
+    pup_size_t kernel_stacksize;
     int errno;
 
     void* cleanup;
@@ -86,6 +90,8 @@ struct pup_cpu {
  */
 static int pup_sched_ready_remove(struct _pthread_obj* thread);
 static int pup_sched_ready_insert(struct _pthread_obj* thread);
+static void pup_thread_destroy(struct _pthread_obj* thread);
+static int pup_thread_stack_used_percent(void* stackaddr, pup_size_t stacksize);
 
 /**
  * pup_container_of - return the start address of struct type, while ptr is the
@@ -529,6 +535,37 @@ void pup_thread_entry(void (*entry)(void* parameter), void* param) {
 static void _p_thread_cleanup(struct _pthread_obj* obj) {
 }
 
+static void pup_thread_destroy(struct _pthread_obj* thread) {
+    if (!thread) {
+        return;
+    }
+
+    if (thread->arch_data) {
+        arch_delete_thread(thread->arch_data);
+        thread->arch_data = PUP_NULL;
+    }
+
+    kheap_free(thread);
+}
+
+static int pup_thread_stack_used_percent(void* stackaddr, pup_size_t stacksize) {
+    pup_size_t total_size;
+    pup_uint8_t* ptr;
+
+    if (!stackaddr || stacksize == 0) {
+        return -1;
+    }
+
+    total_size = stacksize;
+    ptr = (pup_uint8_t*)stackaddr;
+    while (stacksize > 0 && *ptr == '#') {
+        ptr++;
+        stacksize--;
+    }
+
+    return (int)((stacksize * 100U) / total_size);
+}
+
 pthread_t pthread_self(void) {
     return pup_cpu_self()->curr_thread;
 }
@@ -563,6 +600,26 @@ pup_size_t pup_thread_get_stacksize(pthread_t thread) {
     return pthread_obj->stacksize;
 }
 
+void* pup_thread_get_kernel_stackaddr(pthread_t thread) {
+    struct _pthread_obj* pthread_obj = thread;
+
+    if (!pthread_obj) {
+        return PUP_NULL;
+    }
+
+    return pthread_obj->kernel_stackaddr;
+}
+
+pup_size_t pup_thread_get_kernel_stacksize(pthread_t thread) {
+    struct _pthread_obj* pthread_obj = thread;
+
+    if (!pthread_obj) {
+        return 0;
+    }
+
+    return pthread_obj->kernel_stacksize;
+}
+
 pthread_t pup_thread_next(void) {
     return pup_cpu_self()->next_thread;
 }
@@ -581,6 +638,10 @@ int pthread_attr_setstacksize(pthread_attr_t* thread_attributes, pup_size_t stac
 
 int pthread_attr_setpriority(pthread_attr_t* thread_attributes, int priority) {
     thread_attributes->priority = priority;
+    return 0;
+}
+int pthread_attr_setuser(pthread_attr_t* thread_attributes, int is_user_thread) {
+    thread_attributes->is_user_thread = is_user_thread ? 1 : 0;
     return 0;
 }
 #if PUP_CPU_NR > 1
@@ -619,16 +680,12 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
     struct _pthread_obj* pthread_obj;
 
     PUP_ASSERT(attr && attr->stackaddr);
-    // create pthread date from stack top.
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_THREAD, "pthread_obj attr.stackaddr:0x%x, size:%d", attr->stackaddr, attr->stacksize);
-    pthread_obj = (struct _pthread_obj*)PUP_ALIGN_DOWN((pup_ubase_t)(attr->stackaddr +
-                                                                     (attr->stacksize - sizeof(struct _pthread_obj))),
-                                                       PUP_ALIGN_SIZE);
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_THREAD, "pthread_obj created at addr:0x%x", pthread_obj);
-    if (!pthread_obj)
-        return 0;
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_THREAD, "pthread_create stackaddr:0x%x, size:%d", attr->stackaddr, attr->stacksize);
 
-    memset(pthread_obj, 0x0, sizeof(struct _pthread_obj));
+    pthread_obj = (struct _pthread_obj*)kheap_calloc(1, sizeof(struct _pthread_obj));
+    if (!pthread_obj) {
+        return -1;
+    }
 
     pthread_obj->attr = *attr;
 
@@ -637,7 +694,7 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
     pthread_obj->entry = start_routine;
     pthread_obj->param = arg;
     pthread_obj->stackaddr = pthread_obj->attr.stackaddr;
-    pthread_obj->stacksize = pthread_obj->attr.stacksize - PUP_ALIGN(sizeof(struct _pthread_obj), PUP_ALIGN_SIZE);
+    pthread_obj->stacksize = pthread_obj->attr.stacksize;
     pthread_obj->prio = pthread_obj->attr.priority;
     pthread_obj->state = PUP_THREAD_STATE_INIT;
     pthread_obj->cleanup = _p_thread_cleanup;
@@ -648,11 +705,23 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
     pthread_obj->oncpu = CPU_NA;
 #endif
 
-    pup_list_insert(&_g_pobj_list, &pthread_obj->link_node);
-
     memset(pthread_obj->stackaddr, 0x23, pthread_obj->stacksize);
 
-    pthread_obj->arch_data = arch_new_thread(pup_thread_entry, start_routine, arg, pthread_obj->stackaddr, pthread_obj->stacksize);
+    pthread_obj->arch_data = arch_new_thread(pup_thread_entry,
+                                             start_routine,
+                                             arg,
+                                             pthread_obj->stackaddr,
+                                             pthread_obj->stacksize,
+                                             pthread_obj->attr.is_user_thread);
+    if (!pthread_obj->arch_data) {
+        kheap_free(pthread_obj);
+        return -1;
+    }
+
+    pthread_obj->kernel_stackaddr = arch_thread_get_kernel_stackaddr(pthread_obj->arch_data);
+    pthread_obj->kernel_stacksize = arch_thread_get_kernel_stacksize(pthread_obj->arch_data);
+
+    pup_list_insert(&_g_pobj_list, &pthread_obj->link_node);
 
     if (thread_handle)
         *thread_handle = pthread_obj;
@@ -688,6 +757,7 @@ int pthread_join(pthread_t thread_handle, void** value_destination) {
     }
 
     arch_irq_unlock(key);
+    pup_thread_destroy(_thread);
     return ret;
 }
 
@@ -796,6 +866,7 @@ void pup_reap_zombies(void) {
         if (pup_node_is_linked(&thread->link_node)) {
             pup_list_remove(&thread->link_node);
         }
+        pup_thread_destroy(thread);
     }
 
     arch_irq_unlock(key);
@@ -808,17 +879,23 @@ void pup_pthread_list(void) {
 
     maxlen = 8;
 
-    PUP_PRINTK("thread    pri  state   stack size max used\n");
-    PUP_PRINTK("--------  ---  ------- ----------  ------\n");
+    PUP_PRINTK("thread    type pri  state    thread stack       syscall stack\n");
+    PUP_PRINTK("--------  ---- ---  -------  -----------------  -----------------\n");
 
     pup_list_for_each_node(&_g_pobj_list, node) {
         object = pup_list_entry(node, struct _pthread_obj, link_node);
         {
             pup_uint8_t stat;
-            pup_uint8_t* ptr;
+            int thread_stack_used;
+            int syscall_stack_used;
+            const char* type_str;
             struct _pthread_obj* thread = (struct _pthread_obj*)object;
 
-            PUP_PRINTK("%-*.*s  %3d ", maxlen, maxlen, thread->attr.name, thread->prio);
+            type_str = thread->attr.is_user_thread ? "user" : "kern";
+            thread_stack_used = pup_thread_stack_used_percent(thread->stackaddr, thread->stacksize);
+            syscall_stack_used = pup_thread_stack_used_percent(thread->kernel_stackaddr, thread->kernel_stacksize);
+
+            PUP_PRINTK("%-*.*s  %-4s %3d ", maxlen, maxlen, thread->attr.name, type_str, thread->prio);
 
             stat = thread->state;
             if (stat == PUP_THREAD_STATE_READY)
@@ -834,12 +911,21 @@ void pup_pthread_list(void) {
             else if (stat == PUP_THREAD_STATE_SLEEP)
                 PUP_PRINTK(" sleep  ");
 
-            ptr = (pup_uint8_t*)thread->attr.stackaddr;
-            while (*ptr == '#')
-                ptr++;
-            PUP_PRINTK(" 0x%08x    %02d%%  \n",
-                       thread->attr.stacksize,
-                       (thread->attr.stacksize - ((pup_ubase_t)ptr - (pup_ubase_t)thread->attr.stackaddr)) * 100 / thread->attr.stacksize);
+            if (thread_stack_used < 0) {
+                PUP_PRINTK("     n/a           ");
+            } else {
+                PUP_PRINTK(" 0x%08x %3d%%  ",
+                           thread->stacksize,
+                           thread_stack_used);
+            }
+
+            if (syscall_stack_used < 0) {
+                PUP_PRINTK("     n/a\n");
+            } else {
+                PUP_PRINTK(" 0x%08x %3d%%\n",
+                           thread->kernel_stacksize,
+                           syscall_stack_used);
+            }
         }
     }
 }

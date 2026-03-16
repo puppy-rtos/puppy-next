@@ -183,6 +183,7 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     pthread_attr_setstackaddr(&attr, user_threads[i].stack);
     pthread_attr_setstacksize(&attr, stacksize);
     pthread_attr_setpriority(&attr, priority);
+    pthread_attr_setuser(&attr, 1);
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: calling pthread_create");
     int ret = pthread_create(&user_threads[i].thread, &attr, user_thread_wrapper, &user_threads[i]);

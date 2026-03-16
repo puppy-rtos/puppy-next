@@ -446,6 +446,7 @@ int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out) {
     pthread_attr_setstacksize(&attr, USER_APP_STACK_SIZE);
     pthread_attr_setstackaddr(&attr, app->stack_addr);
     pthread_attr_setname(&attr, (char *)(thread_name ? thread_name : "user_app"));
+    pthread_attr_setuser(&attr, 1);
     
     if (pthread_create(&thread, &attr, user_app_thread, app) != 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to create user app thread");

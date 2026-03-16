@@ -5,9 +5,11 @@
  */
 
 #include <puppy_core.h>
+#include <string.h>
 #include "app_loader.h"
 #include "app_manager.h"
 #include "puppy_log.h"
+#include "kheap.h"
 
 #define PUP_GET_CPU_ID() 0
 
@@ -127,12 +129,11 @@ void arch_sched_init(void) {
     SCB_SHPR3 = shpr3;
 }
 
-#define KERNEL_STACK_SIZE  512
-
 struct arch_thread {
     pup_uint32_t stack_ptr;
     pup_uint32_t kernel_stack_ptr;
-    pup_uint32_t kernel_stack[KERNEL_STACK_SIZE / 4];
+    void* kernel_stack_base;
+    pup_uint32_t kernel_stack_size;
 };
 
 struct arch_cpu {
@@ -169,13 +170,29 @@ void* arch_new_thread(void* entry,
                       void* param1,
                       void* param2,
                       void* stack_addr,
-                      pup_uint32_t stack_size) {
+                      pup_uint32_t stack_size,
+                      pup_uint8_t use_kernel_stack) {
     pup_uint32_t i;
     struct arch_thread* arch_data;
     _sf_t* sf;
+    void* kernel_stack_base = PUP_NULL;
 
-    arch_data = (struct arch_thread*)PUP_ALIGN_DOWN(((pup_uint32_t)stack_addr + stack_size) - sizeof(struct arch_thread), 8UL);
-    sf = (_sf_t*)PUP_ALIGN_DOWN((pup_uint32_t)arch_data - sizeof(_sf_t), 8UL);
+    arch_data = (struct arch_thread*)kheap_calloc(1, sizeof(struct arch_thread));
+    if (!arch_data) {
+        return PUP_NULL;
+    }
+
+    if (use_kernel_stack) {
+        kernel_stack_base = kheap_memalign(8, PUP_USER_SYSCALL_STACK_SIZE);
+        if (!kernel_stack_base) {
+            kheap_free(arch_data);
+            return PUP_NULL;
+        }
+
+        memset(kernel_stack_base, 0x23, PUP_USER_SYSCALL_STACK_SIZE);
+    }
+
+    sf = (_sf_t*)PUP_ALIGN_DOWN(((pup_uint32_t)stack_addr + stack_size) - sizeof(_sf_t), 8UL);
 
     /* init all register */
     for (i = 0; i < sizeof(_sf_t) / sizeof(pup_uint32_t); i++) {
@@ -194,10 +211,45 @@ void* arch_new_thread(void* entry,
     sf->ctrl_reg = 0x02;
 
     arch_data->stack_ptr = ((pup_uint32_t)sf);
-    
-    arch_data->kernel_stack_ptr = (pup_uint32_t)&arch_data->kernel_stack[KERNEL_STACK_SIZE / 4];
+    arch_data->kernel_stack_base = kernel_stack_base;
+    arch_data->kernel_stack_size = use_kernel_stack ? PUP_USER_SYSCALL_STACK_SIZE : 0;
+    arch_data->kernel_stack_ptr = use_kernel_stack ? ((pup_uint32_t)kernel_stack_base + PUP_USER_SYSCALL_STACK_SIZE) : 0;
     
     return arch_data;
+}
+
+void arch_delete_thread(void* arch_data_ptr) {
+    struct arch_thread* arch_data = (struct arch_thread*)arch_data_ptr;
+
+    if (!arch_data) {
+        return;
+    }
+
+    if (arch_data->kernel_stack_base) {
+        kheap_free(arch_data->kernel_stack_base);
+    }
+
+    kheap_free(arch_data);
+}
+
+void* arch_thread_get_kernel_stackaddr(void* arch_data_ptr) {
+    struct arch_thread* arch_data = (struct arch_thread*)arch_data_ptr;
+
+    if (!arch_data) {
+        return PUP_NULL;
+    }
+
+    return arch_data->kernel_stack_base;
+}
+
+pup_size_t arch_thread_get_kernel_stacksize(void* arch_data_ptr) {
+    struct arch_thread* arch_data = (struct arch_thread*)arch_data_ptr;
+
+    if (!arch_data) {
+        return 0;
+    }
+
+    return arch_data->kernel_stack_size;
 }
 
 void arch_swap(void* from, void* to) {

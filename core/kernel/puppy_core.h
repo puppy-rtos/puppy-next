@@ -85,6 +85,7 @@ struct pthread_attr_s {
     const char* name;
     pup_uint8_t priority;            /* Priority of the pthread */
     pup_uint8_t detachstate;         /* Initialize to the detach state */
+    pup_uint8_t is_user_thread;      /* Whether this thread should get a syscall kernel stack */
 
     void* stackaddr;            /* Address of memory to be used as stack */
     pup_size_t stacksize;            /* Size of the stack allocated for the pthread */
@@ -121,6 +122,7 @@ int sched_getcpu(void);
 int pthread_attr_setname(pthread_attr_t* thread_attributes, char* name);
 // int pup_pthread_attr_getpriority(pthread_attr_t * thread_attributes, int * priority);
 int pthread_attr_setpriority(pthread_attr_t* thread_attributes, int priority);
+int pthread_attr_setuser(pthread_attr_t* thread_attributes, int is_user_thread);
 const char* pthread_getname(pthread_t thread);
 // int pup_pthread_attr_gettimeslice(pthread_attr_t * thread_attributes, size_t * thread_time_slice);
 // int pup_pthread_attr_settimeslice(pthread_attr_t * thread_attributes, size_t thread_time_slice);
@@ -168,6 +170,8 @@ int pthread_delay(int ticks);
 void* pup_thread_get_arch_data(pthread_t thread);
 void* pup_thread_get_stackaddr(pthread_t thread);
 pup_size_t pup_thread_get_stacksize(pthread_t thread);
+void* pup_thread_get_kernel_stackaddr(pthread_t thread);
+pup_size_t pup_thread_get_kernel_stacksize(pthread_t thread);
 
 /**@}*/
 
@@ -188,7 +192,11 @@ void* arch_new_thread(void* entry,
                       void* param1,
                       void* param2,
                       void* stack_addr,
-                      pup_uint32_t stack_size);
+                      pup_uint32_t stack_size,
+                      pup_uint8_t use_kernel_stack);
+void arch_delete_thread(void* arch_data);
+void* arch_thread_get_kernel_stackaddr(void* arch_data);
+pup_size_t arch_thread_get_kernel_stacksize(void* arch_data);
 void arch_swap(pthread_t old_thread, pthread_t new_thread);
 
 typedef struct {

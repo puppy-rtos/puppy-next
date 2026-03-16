@@ -101,6 +101,8 @@ void *puppy_main_thread(void *arg) {
     if (app_exec("shell", "/rom/shell", NULL, 0) < 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start shell");
     }
+	
+	pthread_delay(1000);
 
     /* Keep main thread alive and periodically reap zombie threads. */
     while (1) {

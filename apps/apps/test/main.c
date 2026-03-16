@@ -1,6 +1,7 @@
 #include "libc.h"
 #include "syscall.h"
 #include "shared/pup_spi.h"
+#include "shared/pup_flash.h"
 #include <string.h>
 
 #ifndef PUP_NULL
@@ -1031,7 +1032,7 @@ static int test_spi_flash_id(void)
         return -1;
     }
     slave = (pup_spi_slave_config_t *)shm_slave;
-    memset(slave, 0, sizeof(*slave));
+    libcm_memset(slave, 0, sizeof(*slave));
     strcpy(slave->name, "flash0");
     slave->cs_id = PUP_SPI2_CS0;
     slave->mode = 0;
@@ -1062,7 +1063,7 @@ static int test_spi_flash_id(void)
             close(fd);
             return -1;
         }
-        memset(shm_xfer, 0, total_size);
+        libcm_memset(shm_xfer, 0, total_size);
 
         xfer    = (pup_spi_transfer_t *)shm_xfer;
         tx_data = (uint8_t *)((char *)shm_xfer + xfer_size);
@@ -1145,9 +1146,9 @@ static int test_shared_heap(void)
 
     // 写入数据测试
     printf("\n--- Test 2: Write data to shared heap ---");
-    memset(ptr1, 0xAA, 1024);
-    memset(ptr2, 0xBB, 2048);
-    memset(ptr3, 0xCC, 512);
+    libcm_memset(ptr1, 0xAA, 1024);
+    libcm_memset(ptr2, 0xBB, 2048);
+    libcm_memset(ptr3, 0xCC, 512);
     printf("Written data to shared heap memory\n");
 
     // 验证数据
@@ -1211,13 +1212,12 @@ static int test_driver_chain(void)
     int fd_gpio = -1;
     int fd_led = -1;
     int fd_key = -1;
-    void *shm_dir = PUP_NULL;     /* shared memory for ioctl arg */
-    void *shm_val = PUP_NULL;     /* shared memory for ioctl arg */
-    char *shm_key = (char *)PUP_NULL;  /* shared memory for key read value */
+    void *shm_dir = PUP_NULL;
+    void *shm_val = PUP_NULL;
+    char *shm_key = (char *)PUP_NULL;
 
     printf("\n=== User-Mode GPIO Driver Chain Test ===\n");
 
-    /* Pre-allocate shared memory buffers for ioctl args and read buffer */
     shm_dir = shared_malloc(sizeof(int));
     shm_val = shared_malloc(sizeof(int));
     shm_key = (char *)shared_malloc(1);
@@ -1299,6 +1299,448 @@ fail:
     return -1;
 }
 
+static int test_flash_functionality(void)
+{
+    int fd;
+    int ret;
+    pup_flash_info_t *info;
+    pup_flash_status_t *status;
+    uint8_t *test_buf;
+    uint8_t *read_buf;
+    uint8_t *backup_buf;
+    uint32_t test_addr;
+    uint32_t test_size;
+    int passed = 1;
+
+    printf("\n=== Flash Functionality Test ===\n");
+
+    fd = open("/dev/flash0", O_RDWR);
+    if (fd < 0) {
+        printf("[flash] Failed to open /dev/flash0, fd=%d\n", fd);
+        return -1;
+    }
+    printf("[flash] Opened /dev/flash0, fd=%d\n", fd);
+
+    info = (pup_flash_info_t *)shared_malloc(sizeof(pup_flash_info_t));
+    if (!info) {
+        printf("[flash] shared_malloc for info failed\n");
+        close(fd);
+        return -1;
+    }
+
+    ret = ioctl(fd, PUP_FLASH_IOCTL_GET_INFO, info);
+    if (ret != 0) {
+        printf("[flash] GET_INFO failed, ret=%d\n", ret);
+        shared_free(info);
+        close(fd);
+        return -1;
+    }
+
+    printf("[flash] Flash Info:\n");
+    printf("  Name: %s\n", info->name);
+    printf("  SPI: %s\n", info->spi_name);
+    printf("  Capacity: %lu bytes (%lu KB)\n", 
+           (unsigned long)info->capacity, 
+           (unsigned long)(info->capacity / 1024));
+    printf("  Erase Granularity: %lu bytes\n", (unsigned long)info->erase_gran);
+    printf("  Manufacturer ID: 0x%02X\n", info->mf_id);
+    printf("  Type ID: 0x%02X\n", info->type_id);
+    printf("  Capacity ID: 0x%02X\n", info->capacity_id);
+    printf("  SFDP Available: %s\n", info->sfdp_available ? "Yes" : "No");
+
+    status = (pup_flash_status_t *)shared_malloc(sizeof(pup_flash_status_t));
+    if (!status) {
+        printf("[flash] shared_malloc for status failed\n");
+        shared_free(info);
+        close(fd);
+        return -1;
+    }
+
+    ret = ioctl(fd, PUP_FLASH_IOCTL_READ_STATUS, status);
+    if (ret == 0) {
+        printf("[flash] Status Register: 0x%02X\n", status->value);
+    } else {
+        printf("[flash] READ_STATUS failed, ret=%d (non-critical)\n", ret);
+    }
+
+    test_size = info->erase_gran > 0 ? info->erase_gran : 256;
+    if (test_size > 4096) test_size = 4096;
+    test_addr = (info->capacity > test_size * 2) ? (info->capacity - test_size * 2) : test_size;
+
+    printf("[flash] Test address: 0x%08lX, size: %lu bytes\n", 
+           (unsigned long)test_addr, (unsigned long)test_size);
+
+    test_buf = (uint8_t *)shared_malloc(test_size);
+    read_buf = (uint8_t *)shared_malloc(test_size);
+    backup_buf = (uint8_t *)shared_malloc(test_size);
+    if (!test_buf || !read_buf || !backup_buf) {
+        printf("[flash] shared_malloc for buffers failed\n");
+        if (test_buf) shared_free(test_buf);
+        if (read_buf) shared_free(read_buf);
+        if (backup_buf) shared_free(backup_buf);
+        shared_free(status);
+        shared_free(info);
+        close(fd);
+        return -1;
+    }
+
+    printf("\n--- Test 1: Read backup data ---\n");
+    {
+        pup_flash_read_req_t *read_req = (pup_flash_read_req_t *)shared_malloc(sizeof(pup_flash_read_req_t));
+        if (!read_req) {
+            printf("[flash] shared_malloc for read_req failed\n");
+            goto cleanup;
+        }
+        read_req->addr = test_addr;
+        read_req->buf = backup_buf;
+        read_req->size = test_size;
+        ret = ioctl(fd, PUP_FLASH_IOCTL_READ, read_req);
+        shared_free(read_req);
+        
+        if (ret != 0) {
+            printf("[flash] Backup read failed, ret=%d\n", ret);
+            passed = 0;
+            goto cleanup;
+        }
+        printf("[flash] Backup read OK, %lu bytes\n", (unsigned long)test_size);
+    }
+
+    printf("\n--- Test 2: Erase sector ---\n");
+    {
+        pup_flash_erase_req_t *erase_req = (pup_flash_erase_req_t *)shared_malloc(sizeof(pup_flash_erase_req_t));
+        if (!erase_req) {
+            printf("[flash] shared_malloc for erase_req failed\n");
+            passed = 0;
+            goto cleanup;
+        }
+        erase_req->addr = test_addr;
+        erase_req->size = test_size;
+        ret = ioctl(fd, PUP_FLASH_IOCTL_ERASE, erase_req);
+        shared_free(erase_req);
+        
+        if (ret != 0) {
+            printf("[flash] Erase failed, ret=%d\n", ret);
+            passed = 0;
+            goto restore;
+        }
+        printf("[flash] Erase OK\n");
+    }
+
+    printf("\n--- Test 3: Verify erased data (should be 0xFF) ---\n");
+    {
+        pup_flash_read_req_t *read_req = (pup_flash_read_req_t *)shared_malloc(sizeof(pup_flash_read_req_t));
+        if (!read_req) {
+            printf("[flash] shared_malloc for read_req failed\n");
+            passed = 0;
+            goto restore;
+        }
+        read_req->addr = test_addr;
+        read_req->buf = read_buf;
+        read_req->size = test_size;
+        ret = ioctl(fd, PUP_FLASH_IOCTL_READ, read_req);
+        shared_free(read_req);
+        
+        if (ret != 0) {
+            printf("[flash] Read after erase failed, ret=%d\n", ret);
+            passed = 0;
+            goto restore;
+        }
+
+        int nonzero = 0;
+        for (uint32_t i = 0; i < test_size; i++) {
+            if (read_buf[i] != 0xFF) {
+                nonzero++;
+            }
+        }
+        if (nonzero > 0) {
+            printf("[flash] WARNING: %d/%lu bytes not 0xFF after erase\n", 
+                   nonzero, (unsigned long)test_size);
+        } else {
+            printf("[flash] Erase verify OK (all 0xFF)\n");
+        }
+    }
+
+    printf("\n--- Test 4: Write test pattern ---\n");
+    for (uint32_t i = 0; i < test_size; i++) {
+        test_buf[i] = (uint8_t)((i % 2 == 0) ? 0x55 : 0xAA);
+    }
+    {
+        pup_flash_write_req_t *write_req = (pup_flash_write_req_t *)shared_malloc(sizeof(pup_flash_write_req_t));
+        if (!write_req) {
+            printf("[flash] shared_malloc for write_req failed\n");
+            passed = 0;
+            goto restore;
+        }
+        write_req->addr = test_addr;
+        write_req->buf = test_buf;
+        write_req->size = test_size;
+        ret = ioctl(fd, PUP_FLASH_IOCTL_WRITE, write_req);
+        shared_free(write_req);
+        
+        if (ret != 0) {
+            printf("[flash] Write failed, ret=%d\n", ret);
+            passed = 0;
+            goto restore;
+        }
+        printf("[flash] Write OK\n");
+    }
+
+    printf("\n--- Test 5: Verify written data ---\n");
+    {
+        pup_flash_read_req_t *read_req = (pup_flash_read_req_t *)shared_malloc(sizeof(pup_flash_read_req_t));
+        if (!read_req) {
+            printf("[flash] shared_malloc for read_req failed\n");
+            passed = 0;
+            goto restore;
+        }
+        read_req->addr = test_addr;
+        read_req->buf = read_buf;
+        read_req->size = test_size;
+        ret = ioctl(fd, PUP_FLASH_IOCTL_READ, read_req);
+        shared_free(read_req);
+        
+        if (ret != 0) {
+            printf("[flash] Read after write failed, ret=%d\n", ret);
+            passed = 0;
+            goto restore;
+        }
+
+        int mismatch = 0;
+        for (uint32_t i = 0; i < test_size; i++) {
+            if (read_buf[i] != test_buf[i]) {
+                mismatch++;
+                if (mismatch <= 4) {
+                    printf("[flash] Mismatch at offset %lu: got 0x%02X, expected 0x%02X\n",
+                           (unsigned long)i, read_buf[i], test_buf[i]);
+                }
+            }
+        }
+        if (mismatch > 0) {
+            printf("[flash] FAILED: %d/%lu bytes mismatch\n", mismatch, (unsigned long)test_size);
+            passed = 0;
+        } else {
+            printf("[flash] Verify OK, pattern matches\n");
+        }
+    }
+
+restore:
+    printf("\n--- Restoring original data ---\n");
+    {
+        pup_flash_erase_req_t *erase_req = (pup_flash_erase_req_t *)shared_malloc(sizeof(pup_flash_erase_req_t));
+        if (erase_req) {
+            erase_req->addr = test_addr;
+            erase_req->size = test_size;
+            ioctl(fd, PUP_FLASH_IOCTL_ERASE, erase_req);
+            shared_free(erase_req);
+        }
+
+        pup_flash_write_req_t *write_req = (pup_flash_write_req_t *)shared_malloc(sizeof(pup_flash_write_req_t));
+        if (write_req) {
+            write_req->addr = test_addr;
+            write_req->buf = backup_buf;
+            write_req->size = test_size;
+            ret = ioctl(fd, PUP_FLASH_IOCTL_WRITE, write_req);
+            shared_free(write_req);
+            if (ret == 0) {
+                printf("[flash] Restore OK\n");
+            } else {
+                printf("[flash] Restore failed, ret=%d\n", ret);
+            }
+        }
+    }
+
+cleanup:
+    if (test_buf) shared_free(test_buf);
+    if (read_buf) shared_free(read_buf);
+    if (backup_buf) shared_free(backup_buf);
+    shared_free(status);
+    shared_free(info);
+    close(fd);
+
+    if (passed) {
+        printf("\n[flash] Functionality test PASSED\n");
+    } else {
+        printf("\n[flash] Functionality test FAILED\n");
+    }
+    return passed ? 0 : -1;
+}
+
+static int test_flash_performance(void)
+{
+    int fd;
+    int ret;
+    pup_flash_info_t *info;
+    uint8_t *test_buf;
+    uint8_t *read_buf;
+    uint32_t test_addr;
+    uint32_t test_size;
+    pup_tick_t start_tick, end_tick;
+    unsigned long elapsed_ms;
+    unsigned long throughput;
+
+    printf("\n=== Flash Performance Test ===\n");
+
+    fd = open("/dev/flash0", O_RDWR);
+    if (fd < 0) {
+        printf("[flash_perf] Failed to open /dev/flash0, fd=%d\n", fd);
+        return -1;
+    }
+
+    info = (pup_flash_info_t *)shared_malloc(sizeof(pup_flash_info_t));
+    if (!info) {
+        printf("[flash_perf] shared_malloc for info failed\n");
+        close(fd);
+        return -1;
+    }
+
+    ret = ioctl(fd, PUP_FLASH_IOCTL_GET_INFO, info);
+    if (ret != 0) {
+        printf("[flash_perf] GET_INFO failed, ret=%d\n", ret);
+        shared_free(info);
+        close(fd);
+        return -1;
+    }
+
+    printf("[flash_perf] Flash capacity: %lu bytes\n", (unsigned long)info->capacity);
+
+    test_size = 4096;
+    test_addr = (info->capacity > test_size * 4) ? (info->capacity - test_size * 4) : test_size;
+
+    test_buf = (uint8_t *)shared_malloc(test_size);
+    read_buf = (uint8_t *)shared_malloc(test_size);
+    if (!test_buf || !read_buf) {
+        printf("[flash_perf] shared_malloc for buffers failed\n");
+        if (test_buf) shared_free(test_buf);
+        if (read_buf) shared_free(read_buf);
+        shared_free(info);
+        close(fd);
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < test_size; i++) {
+        test_buf[i] = (uint8_t)(i & 0xFF);
+    }
+
+    printf("\n--- Performance Test 1: Sequential Read ---\n");
+    printf("[flash_perf] Reading %lu bytes from address 0x%08lX...\n", 
+           (unsigned long)test_size, (unsigned long)test_addr);
+    
+    start_tick = pup_tick_get();
+    {
+        pup_flash_read_req_t *read_req = (pup_flash_read_req_t *)shared_malloc(sizeof(pup_flash_read_req_t));
+        if (read_req) {
+            read_req->addr = test_addr;
+            read_req->buf = read_buf;
+            read_req->size = test_size;
+            ret = ioctl(fd, PUP_FLASH_IOCTL_READ, read_req);
+            shared_free(read_req);
+        } else {
+            ret = -1;
+        }
+    }
+    end_tick = pup_tick_get();
+    
+    if (ret == 0) {
+        elapsed_ms = (unsigned long)(end_tick - start_tick);
+        throughput = elapsed_ms > 0 ? (test_size / elapsed_ms) : test_size;
+        printf("[flash_perf] Read completed in %lu ms\n", elapsed_ms);
+        printf("[flash_perf] Read throughput: %lu bytes/sec\n", throughput * 1000);
+    } else {
+        printf("[flash_perf] Read failed, ret=%d\n", ret);
+    }
+
+    printf("\n--- Performance Test 2: Sequential Write ---\n");
+    printf("[flash_perf] Writing %lu bytes to address 0x%08lX...\n", 
+           (unsigned long)test_size, (unsigned long)test_addr);
+    
+    start_tick = pup_tick_get();
+    {
+        pup_flash_write_req_t *write_req = (pup_flash_write_req_t *)shared_malloc(sizeof(pup_flash_write_req_t));
+        if (write_req) {
+            write_req->addr = test_addr;
+            write_req->buf = test_buf;
+            write_req->size = test_size;
+            ret = ioctl(fd, PUP_FLASH_IOCTL_WRITE, write_req);
+            shared_free(write_req);
+        } else {
+            ret = -1;
+        }
+    }
+    end_tick = pup_tick_get();
+    
+    if (ret == 0) {
+        elapsed_ms = (unsigned long)(end_tick - start_tick);
+        throughput = elapsed_ms > 0 ? (test_size / elapsed_ms) : test_size;
+        printf("[flash_perf] Write completed in %lu ms\n", elapsed_ms);
+        printf("[flash_perf] Write throughput: %lu bytes/sec\n", throughput * 1000);
+    } else {
+        printf("[flash_perf] Write failed, ret=%d\n", ret);
+    }
+
+    printf("\n--- Performance Test 3: Sector Erase ---\n");
+    printf("[flash_perf] Erasing %lu bytes at address 0x%08lX...\n", 
+           (unsigned long)test_size, (unsigned long)test_addr);
+    
+    start_tick = pup_tick_get();
+    {
+        pup_flash_erase_req_t *erase_req = (pup_flash_erase_req_t *)shared_malloc(sizeof(pup_flash_erase_req_t));
+        if (erase_req) {
+            erase_req->addr = test_addr;
+            erase_req->size = test_size;
+            ret = ioctl(fd, PUP_FLASH_IOCTL_ERASE, erase_req);
+            shared_free(erase_req);
+        } else {
+            ret = -1;
+        }
+    }
+    end_tick = pup_tick_get();
+    
+    if (ret == 0) {
+        elapsed_ms = (unsigned long)(end_tick - start_tick);
+        printf("[flash_perf] Erase completed in %lu ms\n", elapsed_ms);
+        printf("[flash_perf] Erase throughput: %lu bytes/sec\n", 
+               elapsed_ms > 0 ? (test_size / elapsed_ms) * 1000 : test_size * 1000);
+    } else {
+        printf("[flash_perf] Erase failed, ret=%d\n", ret);
+    }
+
+    printf("\n--- Performance Test 4: Erase-Write Combined ---\n");
+    printf("[flash_perf] Erase-Write %lu bytes at address 0x%08lX...\n", 
+           (unsigned long)test_size, (unsigned long)test_addr);
+    
+    start_tick = pup_tick_get();
+    {
+        pup_flash_write_req_t *write_req = (pup_flash_write_req_t *)shared_malloc(sizeof(pup_flash_write_req_t));
+        if (write_req) {
+            write_req->addr = test_addr;
+            write_req->buf = test_buf;
+            write_req->size = test_size;
+            ret = ioctl(fd, PUP_FLASH_IOCTL_ERASE_WRITE, write_req);
+            shared_free(write_req);
+        } else {
+            ret = -1;
+        }
+    }
+    end_tick = pup_tick_get();
+    
+    if (ret == 0) {
+        elapsed_ms = (unsigned long)(end_tick - start_tick);
+        throughput = elapsed_ms > 0 ? (test_size / elapsed_ms) : test_size;
+        printf("[flash_perf] Erase-Write completed in %lu ms\n", elapsed_ms);
+        printf("[flash_perf] Erase-Write throughput: %lu bytes/sec\n", throughput * 1000);
+    } else {
+        printf("[flash_perf] Erase-Write failed, ret=%d\n", ret);
+    }
+
+    shared_free(test_buf);
+    shared_free(read_buf);
+    shared_free(info);
+    close(fd);
+
+    printf("\n[flash_perf] Performance test completed\n");
+    return 0;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -1313,6 +1755,8 @@ static const test_cmd_t test_cmds[] = {
     {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},
     {"shm", "Test shared heap memory allocation and free", test_shared_heap},
     {"driver", "Test user-mode gpio driver open/ioctl/read chain", test_driver_chain},
+    {"flash", "Test flash driver functionality (read/write/erase)", test_flash_functionality},
+    {"flash_perf", "Test flash driver performance (throughput)", test_flash_performance},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

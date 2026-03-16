@@ -44,6 +44,7 @@ target("puppy")
         "core",
         "core/fs",
         "core/dev",
+        "core/shared",
         "core/app",
         "core/kernel",
         "core/arch",
@@ -148,16 +149,21 @@ define_user_app_target("driver", {
         "apps/apps/driver/main.c",
         "apps/apps/driver/driver_gpio.c",
         "apps/apps/driver/driver_spi.c",
+        "apps/apps/driver/driver_flash.c",
         "apps/apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
         "apps/apps/driver/dtm/ips/clk_arm_m4_st_gd.c",
-        "apps/apps/driver/dtm/ips/spi_arm_m4_st_gd.c"
+        "apps/apps/driver/dtm/ips/spi_arm_m4_st_gd.c",
+        "apps/apps/driver/sfud/src/*.c"
     },
     includes = {
+        "apps/apps/driver",
         "apps/apps/driver/dtm",
         "apps/apps/driver/dtm/common",
         "apps/apps/driver/dtm/ips",
         "apps/apps/driver/dtm/arch/arm/cortex-m4",
-        "apps/apps/driver/dtm/chips/stm32f407"
+        "apps/apps/driver/dtm/chips/stm32f407",
+        "apps/apps/driver/sfud/inc",
+        "core/shared"
     },
     output = "driver.bin",
     stack_size = "0x800"

@@ -126,7 +126,7 @@ int pup_mpu_dynamic_init(pup_mpu_dynamic_config_t *config, pup_uint32_t app_id) 
         return -1;
     }
     
-    memset(config, 0, sizeof(pup_mpu_dynamic_config_t));
+    libcm_memset(config, 0, sizeof(pup_mpu_dynamic_config_t));
     config->app_id = app_id;
     config->region_count = 0;
     config->lock = 0;
@@ -296,7 +296,7 @@ void pup_mpu_dynamic_cleanup(pup_mpu_dynamic_config_t *config) {
     
     pup_mpu_enable();
     
-    memset(config, 0, sizeof(pup_mpu_dynamic_config_t));
+    libcm_memset(config, 0, sizeof(pup_mpu_dynamic_config_t));
     PUP_LOG_DEBUG(PUP_LOG_MODULE_MPU, "Dynamic MPU config cleaned up");
 }
 

@@ -189,7 +189,7 @@ void* arch_new_thread(void* entry,
             return PUP_NULL;
         }
 
-        memset(kernel_stack_base, 0x23, PUP_USER_SYSCALL_STACK_SIZE);
+        libcm_memset(kernel_stack_base, 0x23, PUP_USER_SYSCALL_STACK_SIZE);
     }
 
     sf = (_sf_t*)PUP_ALIGN_DOWN(((pup_uint32_t)stack_addr + stack_size) - sizeof(_sf_t), 8UL);

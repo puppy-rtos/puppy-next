@@ -1,12 +1,14 @@
 #include "libc.h"
 #include "syscall.h"
 #include "dtm_spi.h"
+#include "dtm_gpio.h"
 #include "dtm_bindings.h"
 #include "shared/pup_devfs_proto.h"
 #include "shared/pup_driver_abi.h"
 #include "shared/pup_spi.h"
 #include "driver_gpio.h"
 #include "driver_spi.h"
+#include "driver_flash.h"
 
 int g_server_channel = -1;
 int g_key_irq_handle = -1;
@@ -44,6 +46,8 @@ static void gpio_service_loop(void)
 
             if (req->device_id == SPI_DEVICE_ID) {
                 ret = spi_handle_request(req);
+            } else if (req->device_id == FLASH_DEVICE_ID) {
+                ret = flash_handle_request(req);
             } else {
                 gpio_user_dev_t* dev = gpio_find_by_id(req->device_id);
                 ret = gpio_handle_request(dev, req);
@@ -94,6 +98,19 @@ void app_main(const char* arg)
     /* Initialize SPI2 and register /dev/spi2 */
     {
         dtm_spi_config_t spi_cfg;
+
+        dtm_gpio_set(GPIOC, DTM_GPIO_PIN2, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
+                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
+        dtm_gpio_af_set(GPIOC, DTM_GPIO_PIN2, 5);
+
+        dtm_gpio_set(GPIOC, DTM_GPIO_PIN3, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
+                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
+        dtm_gpio_af_set(GPIOC, DTM_GPIO_PIN3, 5);
+
+        dtm_gpio_set(GPIOB, DTM_GPIO_PIN13, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
+                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
+        dtm_gpio_af_set(GPIOB, DTM_GPIO_PIN13, 5);
+
         spi_cfg.mode = DTM_SPI_MODE_0;
         spi_cfg.datasize = DTM_SPI_DATASIZE_8BIT;
         spi_cfg.baudrate_prescaler = DTM_SPI_BAUDRATE_PRESCALER_128;
@@ -105,6 +122,16 @@ void app_main(const char* arg)
 
         if (spi_register_one() != 0) {
             printf("[driver] SPI2 registration failed, continuing without SPI\n");
+        }
+    }
+
+    /* Initialize flash driver and register /dev/flash0 */
+    {
+        int flash_ret = flash_init();
+        if (flash_ret != 0) {
+            printf("[driver] flash0 init failed (ret=%d), continuing without flash\n", flash_ret);
+        } else {
+            printf("[driver] flash0 initialized\n");
         }
     }
 

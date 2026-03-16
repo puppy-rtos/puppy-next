@@ -27,6 +27,7 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
 {
     int i;
     unsigned int s, offset;
+    unsigned int old_val, new_val;
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "kernel_reloc: got_base=0x%08x text_base=0x%08x",
                   (unsigned int)got_base, text_base);
@@ -36,6 +37,7 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
     /* GOT relocation (two-branch) */
     for (i = 0, s = gs; s < ge; s += 4, i++)
     {
+        old_val = got_base[i];
         if (got_base[i] >= gs)
         {
             offset = got_base[i] - gs;
@@ -46,6 +48,9 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
             offset = got_base[i] - ts;
             got_base[i] = offset + text_base;
         }
+        new_val = got_base[i];
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "GOT[%d] @0x%08x: 0x%08x -> 0x%08x",
+                      i, (unsigned int)&got_base[i], old_val, new_val);
     }
     PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "GOT reloc done, %d entries", (int)(ge - gs) / 4);
 
@@ -80,6 +85,7 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
             offset = rel_addr - gs;
             unsigned int *pointer = (unsigned int *)((unsigned int)got_base + offset);
 
+            old_val = *pointer;
             if (*pointer >= gs)
             {
                 offset = *pointer - gs;
@@ -90,6 +96,9 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
                 offset = *pointer - ts;
                 *pointer = offset + text_base;
             }
+            new_val = *pointer;
+            PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "REL @0x%08x: 0x%08x -> 0x%08x",
+                          (unsigned int)pointer, old_val, new_val);
         }
         PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, ".rel.dyn reloc done");
     }

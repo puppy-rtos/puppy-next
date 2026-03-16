@@ -799,7 +799,7 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
     pthread_obj->oncpu = CPU_NA;
 #endif
 
-    memset(pthread_obj->stackaddr, PUP_STACK_FILL_BYTE, pthread_obj->stacksize);
+    libcm_memset(pthread_obj->stackaddr, PUP_STACK_FILL_BYTE, pthread_obj->stacksize);
 
     pthread_obj->arch_data = arch_new_thread(pup_thread_entry,
                                              start_routine,

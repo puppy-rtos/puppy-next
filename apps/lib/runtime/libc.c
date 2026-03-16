@@ -420,7 +420,7 @@ int strcmp(const char* s1, const char* s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-void* memset(void* s, int c, size_t n) {
+void* libcm_memset(void* s, int c, size_t n) {
     unsigned char* p = s;
     while (n--)
         *p++ = (unsigned char)c;

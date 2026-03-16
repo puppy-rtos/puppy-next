@@ -174,7 +174,7 @@ void* kheap_calloc(size_t nmemb, size_t size)
     ptr = kheap_malloc(total);
     
     if (ptr != NULL) {
-        memset(ptr, 0, total);
+        libcm_memset(ptr, 0, total);
     }
     
     return ptr;

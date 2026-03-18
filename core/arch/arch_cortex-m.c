@@ -526,4 +526,20 @@ extern void return_user_space(void);
 extern void syscall_entry(void);
 extern void SVC_Handler(void);
 
+/**
+ * @brief Get current stack pointer
+ * Returns the current stack pointer (PSP in thread mode, MSP otherwise)
+ */
+pup_ubase_t arch_get_stack_pointer(void) {
+    pup_ubase_t sp = 0;
+    __asm volatile("MRS %0, PSP" : "=r" (sp));
+    
+    /* If PSP is 0, we're likely in handler mode, read MSP instead */
+    if (sp == 0) {
+        __asm volatile("MRS %0, MSP" : "=r" (sp));
+    }
+    
+    return sp;
+}
+
 #endif

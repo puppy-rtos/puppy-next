@@ -5,6 +5,8 @@ MEMORY
 }
 ENTRY(app_main)
 
+__user_app_stack_size = DEFINED(__user_app_stack_size) ? __user_app_stack_size : 0x2000;
+
 SECTIONS
 {
     .app_header :
@@ -85,7 +87,7 @@ SECTIONS
     {
         . = ALIGN(4);
         _sstack = .;
-        . = . + 0x1000;
+        . = . + __user_app_stack_size;
         _estack = .;
     } > USER_APP_RAM
 

@@ -3,7 +3,7 @@
 
 #include <puppy_core.h>
 
-#define USER_APP_STACK_SIZE 0x1000
+#define USER_APP_STACK_SIZE 0x2000
 
 typedef struct {
     void* entry;

@@ -1,7 +1,7 @@
 #ifndef __APP_HEADER_H__
 #define __APP_HEADER_H__
 
-#define USER_APP_STACK_SIZE 0x1000
+#define USER_APP_STACK_SIZE 0x2000
 
 typedef struct {
     unsigned int magic;

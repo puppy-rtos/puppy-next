@@ -9,6 +9,7 @@
 #include "pup_console.h"
 #include "kheap.h"
 #include "pup_sem.h"
+#include "stack_guard.h"
 
 void syscall_uart_rx_init(void)
 {
@@ -444,6 +445,14 @@ long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "syscall_handler: num=%d, args=%d,%d,%d,%d", 
                (int)syscall_num, (int)arg1, (int)arg2, (int)arg3, (int)arg4);
     
+    /* Check stack at syscall entry */
+    pthread_t current_thread = pthread_self();
+    if (pup_stack_guard_check_syscall_context(current_thread) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "Stack overflow detected at syscall entry for thread '%s'",
+                      pthread_getname(current_thread));
+        return -1;
+    }
+    
     if (arch_in_irq()) {
         PUP_LOG_WARNING(PUP_LOG_MODULE_SYSCALL, "Executing in interrupt context");
     }
@@ -464,6 +473,14 @@ long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg
     }
     
     long result = func(arg1, arg2, arg3, arg4);
+    
+    /* Check stack at syscall exit */
+    if (pup_stack_guard_check_syscall_context(current_thread) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "Stack overflow detected at syscall exit for thread '%s'",
+                      pthread_getname(current_thread));
+        return -1;
+    }
+    
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "Syscall %d returned: %d", (int)syscall_num, (int)result);
     return result;
 }

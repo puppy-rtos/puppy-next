@@ -9,6 +9,7 @@
 #include "puppy_log.h"
 #include "kheap.h"
 #include "app_manager.h"
+#include "stack_guard.h"
 
 #ifdef PUP_DEBUG
 #define PUP_SCHED_GUARD_ENABLED 1
@@ -40,7 +41,7 @@ const pthread_attr_t pthread_default_attr = {
     PUP_SCHED_PRIO_DEFAULT,
     PTHREAD_CREATE_JOINABLE, /* detach state */
     0,
-    0,
+    PUP_NULL,
     PUP_CONFIG_PTHREAD_STACK_DEFAULT,
 };
 
@@ -324,6 +325,14 @@ void pup_sched_swap_done_cb(void) {
 
     cpu->next_thread->state = PUP_THREAD_STATE_RUN;
     cpu->curr_thread = cpu->next_thread;
+    
+    /* Check for stack overflow after thread switch */
+    if (pup_stack_guard_check(cpu->curr_thread) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SCHED, "Stack guard violation detected, terminating thread '%s'", 
+                      cpu->curr_thread->attr.name);
+        cpu->curr_thread->state = PUP_THREAD_STATE_DEAD;
+    }
+    
     cpu->next_thread = PUP_NULL;
 }
 
@@ -343,6 +352,14 @@ int pup_sched(void) {
             if (_cpu->curr_thread && _cpu->curr_thread->state == PUP_THREAD_STATE_RUN && _h_thread->prio >= _cpu->curr_thread->prio) {
                 goto _exit;
             }
+            
+            /* Check current thread stack before switching away */
+            if (_cpu->curr_thread && pup_stack_guard_check(_cpu->curr_thread) != 0) {
+                PUP_LOG_ERROR(PUP_LOG_MODULE_SCHED, "Stack guard violation in current thread '%s', terminating", 
+                              _cpu->curr_thread->attr.name);
+                _cpu->curr_thread->state = PUP_THREAD_STATE_DEAD;
+            }
+            
             _cpu->next_thread = _h_thread;
             pup_sched_ready_remove(_h_thread);
             if (_cpu->curr_thread && _cpu->curr_thread->state == PUP_THREAD_STATE_RUN) {
@@ -549,21 +566,31 @@ static void pup_thread_destroy(struct _pthread_obj* thread) {
 }
 
 static int pup_thread_stack_used_percent(void* stackaddr, pup_size_t stacksize) {
-    pup_size_t total_size;
+    pup_size_t scan_size;
+    pup_size_t remaining;
+    pup_size_t guard_bytes;
     pup_uint8_t* ptr;
 
     if (!stackaddr || stacksize == 0) {
         return -1;
     }
 
-    total_size = stacksize;
     ptr = (pup_uint8_t*)stackaddr;
-    while (stacksize > 0 && *ptr == '#') {
-        ptr++;
-        stacksize--;
+    guard_bytes = (stacksize > PUP_STACK_GUARD_RESERVED_BYTES) ? PUP_STACK_GUARD_RESERVED_BYTES : 0U;
+    ptr += guard_bytes;
+    scan_size = stacksize - guard_bytes;
+    remaining = scan_size;
+
+    if (scan_size == 0U) {
+        return 0;
     }
 
-    return (int)((stacksize * 100U) / total_size);
+    while (remaining > 0 && *ptr == (pup_uint8_t)PUP_STACK_FILL_BYTE) {
+        ptr++;
+        remaining--;
+    }
+
+    return (int)((remaining * 100U) / scan_size);
 }
 
 pthread_t pthread_self(void) {
@@ -640,10 +667,12 @@ int pthread_attr_setpriority(pthread_attr_t* thread_attributes, int priority) {
     thread_attributes->priority = priority;
     return 0;
 }
+
 int pthread_attr_setuser(pthread_attr_t* thread_attributes, int is_user_thread) {
     thread_attributes->is_user_thread = is_user_thread ? 1 : 0;
     return 0;
 }
+
 #if PUP_CPU_NR > 1
 int pthread_attr_setcpu(pthread_attr_t* thread_attributes, int cpu) {
     thread_attributes->bindcpu = cpu;
@@ -705,7 +734,7 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
     pthread_obj->oncpu = CPU_NA;
 #endif
 
-    memset(pthread_obj->stackaddr, 0x23, pthread_obj->stacksize);
+    memset(pthread_obj->stackaddr, PUP_STACK_FILL_BYTE, pthread_obj->stacksize);
 
     pthread_obj->arch_data = arch_new_thread(pup_thread_entry,
                                              start_routine,
@@ -713,6 +742,7 @@ int pthread_create(pthread_t* thread_handle, pthread_attr_t* attr,
                                              pthread_obj->stackaddr,
                                              pthread_obj->stacksize,
                                              pthread_obj->attr.is_user_thread);
+
     if (!pthread_obj->arch_data) {
         kheap_free(pthread_obj);
         return -1;
@@ -957,7 +987,7 @@ void pup_show_version(void) {
     PUP_PRINTK("/_/          Powered dy puppy-rtos\n");
 }
 
-char main_pthread_stack[4096];
+char main_pthread_stack[PUP_MAIN_THREAD_STACK_SIZE];
 void* puppy_main_thread(void* arg);
 void puppy_init(void) {
     pthread_attr_t attr;

@@ -414,6 +414,11 @@ static int shell_cmd_free(int argc, char **argv)
     printf("  Used:  %u bytes (%u KB)\n", info.user_used, info.user_used / 1024);
     printf("  Free:  %u bytes (%u KB)\n", info.user_free, info.user_free / 1024);
     printf("  Peak:  %u bytes (%u KB)\n", info.user_peak, info.user_peak / 1024);
+    printf("Shared Heap Usage:\n");
+    printf("  Total: %u bytes (%u KB)\n", info.shared_total, info.shared_total / 1024);
+    printf("  Used:  %u bytes (%u KB)\n", info.shared_used, info.shared_used / 1024);
+    printf("  Free:  %u bytes (%u KB)\n", info.shared_free, info.shared_free / 1024);
+    printf("  Peak:  %u bytes (%u KB)\n", info.shared_peak, info.shared_peak / 1024);
 
     return 0;
 }

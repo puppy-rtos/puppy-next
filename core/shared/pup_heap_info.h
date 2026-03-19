@@ -10,6 +10,10 @@ typedef struct {
     unsigned int user_used;
     unsigned int user_free;
     unsigned int user_peak;
+    unsigned int shared_total;
+    unsigned int shared_used;
+    unsigned int shared_free;
+    unsigned int shared_peak;
 } pup_heap_info_t;
 
 #endif

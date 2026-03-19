@@ -2,6 +2,7 @@
 
 #ifdef DTM_BINFDING_MPU_ARM_M4_ST_GD
 #include "dtm_mpu.h"
+#include <default_config.h>
 
 #define ARM_MPU_REGION_SIZE_32B      ((uint8_t)0x04U)
 #define ARM_MPU_REGION_SIZE_64B      ((uint8_t)0x05U)
@@ -344,6 +345,10 @@ int dtm_mpu_setup_user_protection(void) {
     ARM_MPU_SetRegionEx(1, DTM_ARM_MPU_RBAR(1, DTM_MPU_KERNEL_RAM_BASE), rasr);
     
     dtm_mpu_region_set(2, DTM_MPU_USER_RAM_BASE, DTM_MPU_USER_RAM_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
+    
+    // 配置共享堆区域
+    dtm_mpu_region_set(3, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
     
     dtm_mpu_enable();

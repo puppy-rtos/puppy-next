@@ -564,6 +564,108 @@ static int test_spi_flash_id(void)
     return 0;
 }
 
+static int test_shared_heap(void)
+{
+    void *ptr1, *ptr2, *ptr3;
+    pup_heap_info_t info;
+
+    printf("\n=== Shared Heap Test ===\n");
+
+    // 获取初始堆状态
+    if (free_info(&info) == 0) {
+        printf("Initial shared heap: total=%u, used=%u, free=%u\n",
+               info.shared_total, info.shared_used, info.shared_free);
+    }
+
+    // 测试共享堆内存分配
+    printf("\n--- Test 1: Allocate memory from shared heap ---");
+    ptr1 = shared_malloc(1024);
+    if (!ptr1) {
+        printf("Failed to allocate 1024 bytes from shared heap\n");
+        return -1;
+    }
+    printf("Allocated 1024 bytes at %p\n", ptr1);
+
+    ptr2 = shared_malloc(2048);
+    if (!ptr2) {
+        printf("Failed to allocate 2048 bytes from shared heap\n");
+        shared_free(ptr1);
+        return -1;
+    }
+    printf("Allocated 2048 bytes at %p\n", ptr2);
+
+    ptr3 = shared_memalign(16, 512);
+    if (!ptr3) {
+        printf("Failed to allocate 512 bytes with 16-byte alignment from shared heap\n");
+        shared_free(ptr1);
+        shared_free(ptr2);
+        return -1;
+    }
+    printf("Allocated 512 bytes with 16-byte alignment at %p\n", ptr3);
+
+    // 写入数据测试
+    printf("\n--- Test 2: Write data to shared heap ---");
+    memset(ptr1, 0xAA, 1024);
+    memset(ptr2, 0xBB, 2048);
+    memset(ptr3, 0xCC, 512);
+    printf("Written data to shared heap memory\n");
+
+    // 验证数据
+    printf("\n--- Test 3: Verify data in shared heap ---");
+    int valid = 1;
+    for (int i = 0; i < 1024; i++) {
+        if (((unsigned char*)ptr1)[i] != 0xAA) {
+            valid = 0;
+            break;
+        }
+    }
+    for (int i = 0; i < 2048; i++) {
+        if (((unsigned char*)ptr2)[i] != 0xBB) {
+            valid = 0;
+            break;
+        }
+    }
+    for (int i = 0; i < 512; i++) {
+        if (((unsigned char*)ptr3)[i] != 0xCC) {
+            valid = 0;
+            break;
+        }
+    }
+    if (valid) {
+        printf("Data verification passed\n");
+    } else {
+        printf("Data verification failed\n");
+        shared_free(ptr1);
+        shared_free(ptr2);
+        shared_free(ptr3);
+        return -1;
+    }
+
+    // 获取堆状态
+    if (free_info(&info) == 0) {
+        printf("\nShared heap after allocation: total=%u, used=%u, free=%u\n",
+               info.shared_total, info.shared_used, info.shared_free);
+    }
+
+    // 测试释放内存
+    printf("\n--- Test 4: Free memory from shared heap ---");
+    shared_free(ptr1);
+    printf("Freed 1024 bytes at %p\n", ptr1);
+    shared_free(ptr2);
+    printf("Freed 2048 bytes at %p\n", ptr2);
+    shared_free(ptr3);
+    printf("Freed 512 bytes at %p\n", ptr3);
+
+    // 获取最终堆状态
+    if (free_info(&info) == 0) {
+        printf("\nShared heap after free: total=%u, used=%u, free=%u\n",
+               info.shared_total, info.shared_used, info.shared_free);
+    }
+
+    printf("\nShared heap test completed\n");
+    return 0;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -575,6 +677,7 @@ static const test_cmd_t test_cmds[] = {
     {"key", "Read PC5 key0 status for 5 seconds", test_key0},
     {"sem", "Test named semaphore wait/post/close", test_sem},
     {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},
+    {"shm", "Test shared heap memory allocation and free", test_shared_heap},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

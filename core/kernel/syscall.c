@@ -436,6 +436,10 @@ static long sys_free(long arg1, long arg2, long arg3, long arg4) {
     info->user_used = (unsigned int)kheap_user_used_size();
     info->user_free = (unsigned int)kheap_user_free_size();
     info->user_peak = (unsigned int)kheap_user_peak_used_size();
+    info->shared_total = (unsigned int)kheap_shared_total_size();
+    info->shared_used = (unsigned int)kheap_shared_used_size();
+    info->shared_free = (unsigned int)kheap_shared_free_size();
+    info->shared_peak = (unsigned int)kheap_shared_peak_used_size();
 
     return 0;
 }
@@ -457,6 +461,25 @@ static long sys_sem_wait(long arg1, long arg2, long arg3, long arg4) {
 
 static long sys_sem_post(long arg1, long arg2, long arg3, long arg4) {
     return (long)pup_sem_post((int)arg1);
+}
+
+static long sys_shared_malloc(long arg1, long arg2, long arg3, long arg4) {
+    size_t size = (size_t)arg1;
+    void* ptr = kheap_shared_malloc(size);
+    return (long)ptr;
+}
+
+static long sys_shared_free(long arg1, long arg2, long arg3, long arg4) {
+    void* ptr = (void*)arg1;
+    kheap_shared_free(ptr);
+    return 0;
+}
+
+static long sys_shared_memalign(long arg1, long arg2, long arg3, long arg4) {
+    size_t align = (size_t)arg1;
+    size_t size = (size_t)arg2;
+    void* ptr = kheap_shared_memalign(align, size);
+    return (long)ptr;
 }
 
 static const syscall_func_t syscall_table[] = {
@@ -482,6 +505,9 @@ static const syscall_func_t syscall_table[] = {
     [SYS_SEM_CLOSE] = sys_sem_close,
     [SYS_SEM_WAIT]  = sys_sem_wait,
     [SYS_SEM_POST]  = sys_sem_post,
+    [SYS_SHARED_MALLOC] = sys_shared_malloc,
+    [SYS_SHARED_FREE] = sys_shared_free,
+    [SYS_SHARED_MEMALIGN] = sys_shared_memalign,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

@@ -19,6 +19,14 @@ size_t kheap_user_used_size(void);
 size_t kheap_user_free_size(void);
 size_t kheap_user_peak_used_size(void);
 
+void* kheap_shared_malloc(size_t size);
+void* kheap_shared_memalign(size_t align, size_t size);
+void kheap_shared_free(void* ptr);
+size_t kheap_shared_total_size(void);
+size_t kheap_shared_used_size(void);
+size_t kheap_shared_free_size(void);
+size_t kheap_shared_peak_used_size(void);
+
 size_t kheap_total_size(void);
 size_t kheap_used_size(void);
 size_t kheap_free_size(void);

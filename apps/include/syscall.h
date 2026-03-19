@@ -33,6 +33,10 @@
 #define SYS_SEM_WAIT   21
 #define SYS_SEM_POST   22
 
+#define SYS_SHARED_MALLOC    23
+#define SYS_SHARED_FREE      24
+#define SYS_SHARED_MEMALIGN  25
+
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
 static inline long write(int fd, const char* buf, long len) {
@@ -142,6 +146,18 @@ static inline int sem_wait(int handle) {
 
 static inline int sem_post(int handle) {
     return (int)syscall(SYS_SEM_POST, (long)handle, 0, 0, 0);
+}
+
+static inline void* shared_malloc(size_t size) {
+    return (void*)syscall(SYS_SHARED_MALLOC, size, 0, 0, 0);
+}
+
+static inline void shared_free(void* ptr) {
+    syscall(SYS_SHARED_FREE, (long)ptr, 0, 0, 0);
+}
+
+static inline void* shared_memalign(size_t align, size_t size) {
+    return (void*)syscall(SYS_SHARED_MEMALIGN, align, size, 0, 0);
 }
 
 #endif

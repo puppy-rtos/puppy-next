@@ -75,6 +75,14 @@
 #define PUP_APP_RAM_SIZE             (64UL * 1024UL)
 #endif
 
+#ifndef PUP_SHARED_RAM_BASE
+#define PUP_SHARED_RAM_BASE          0x10000000UL
+#endif
+
+#ifndef PUP_SHARED_RAM_SIZE
+#define PUP_SHARED_RAM_SIZE          (64UL * 1024UL)
+#endif
+
 #ifndef PUP_RAM_ADDRESS_START
 #define PUP_RAM_ADDRESS_START        PUP_KERNEL_RAM_BASE
 #endif

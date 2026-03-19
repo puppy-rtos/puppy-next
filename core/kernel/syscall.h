@@ -33,6 +33,10 @@
 #define SYS_SEM_WAIT   21
 #define SYS_SEM_POST   22
 
+#define SYS_SHARED_MALLOC    23
+#define SYS_SHARED_FREE      24
+#define SYS_SHARED_MEMALIGN  25
+
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 
 long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg4);

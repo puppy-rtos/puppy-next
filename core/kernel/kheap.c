@@ -2,6 +2,7 @@
 #include "tlsf.h"
 #include "puppy_log.h"
 #include "mpu.h"
+#include <puppy_core.h>
 #include <string.h>
 
 #ifndef ALIGN_UP
@@ -18,13 +19,24 @@ extern char _heap_end;
 static tlsf_t g_kheap_tlsf = NULL;
 static pool_t g_kheap_pool = NULL;
 static size_t g_kheap_total_size = 0;
+static size_t g_kheap_current_used = 0;
 static size_t g_kheap_peak_used = 0;
 static tlsf_t g_kheap_user_tlsf = NULL;
 static pool_t g_kheap_user_pool = NULL;
 static size_t g_kheap_user_total_size = 0;
+static size_t g_kheap_user_current_used = 0;
 static size_t g_kheap_user_peak_used = 0;
 
-static void kheap_walker(void* ptr, size_t size, int used, void* user);
+static inline pup_base_t kheap_lock(void)
+{
+    return arch_irq_lock();
+}
+
+static inline void kheap_unlock(pup_base_t key)
+{
+    arch_irq_unlock(key);
+}
+
 static void kheap_refresh_peak(void);
 static void kheap_user_refresh_peak(void);
 
@@ -53,6 +65,7 @@ void kheap_init(void)
     
     g_kheap_pool = tlsf_get_pool(g_kheap_tlsf);
     g_kheap_total_size = heap_size;
+    g_kheap_current_used = 0;
     g_kheap_peak_used = 0;
 
     user_heap_start = (void*)ALIGN_UP((size_t)PUP_MPU_USER_RAM_BASE, 8);
@@ -63,6 +76,7 @@ void kheap_init(void)
         if (g_kheap_user_tlsf != NULL) {
             g_kheap_user_pool = tlsf_get_pool(g_kheap_user_tlsf);
             g_kheap_user_total_size = user_heap_size;
+            g_kheap_user_current_used = 0;
             g_kheap_user_peak_used = 0;
             PUP_LOG_INFO(PUP_LOG_MODULE_KHEAP, "kheap user pool: 0x%08x, size: %u bytes",
                          (unsigned int)user_heap_start, (unsigned int)user_heap_size);
@@ -83,26 +97,43 @@ void kheap_init(void)
 void* kheap_malloc(size_t size)
 {
     void* ptr;
+    size_t used;
+    pup_base_t key;
     
     if (g_kheap_tlsf == NULL) {
         return NULL;
     }
     
+    key = kheap_lock();
     ptr = tlsf_malloc(g_kheap_tlsf, size);
     if (ptr != NULL) {
+        used = tlsf_block_size(ptr);
+        g_kheap_current_used += used;
         kheap_refresh_peak();
     }
+    kheap_unlock(key);
     
     return ptr;
 }
 
 void kheap_free(void* ptr)
 {
+    pup_base_t key;
+    size_t used;
+
     if (ptr == NULL || g_kheap_tlsf == NULL) {
         return;
     }
-    
+
+    key = kheap_lock();
+    used = tlsf_block_size(ptr);
     tlsf_free(g_kheap_tlsf, ptr);
+    if (g_kheap_current_used >= used) {
+        g_kheap_current_used -= used;
+    } else {
+        g_kheap_current_used = 0;
+    }
+    kheap_unlock(key);
 }
 
 void* kheap_calloc(size_t nmemb, size_t size)
@@ -123,15 +154,38 @@ void* kheap_calloc(size_t nmemb, size_t size)
 void* kheap_realloc(void* ptr, size_t size)
 {
     void* new_ptr;
+    size_t old_used = 0;
+    size_t new_used = 0;
+    pup_base_t key;
 
     if (g_kheap_tlsf == NULL) {
         return NULL;
     }
     
-    new_ptr = tlsf_realloc(g_kheap_tlsf, ptr, size);
-    if (new_ptr != NULL || size == 0) {
-        kheap_refresh_peak();
+    key = kheap_lock();
+    if (ptr != NULL) {
+        old_used = tlsf_block_size(ptr);
     }
+    new_ptr = tlsf_realloc(g_kheap_tlsf, ptr, size);
+
+    if (new_ptr != NULL) {
+        new_used = tlsf_block_size(new_ptr);
+        if (g_kheap_current_used >= old_used) {
+            g_kheap_current_used -= old_used;
+        } else {
+            g_kheap_current_used = 0;
+        }
+        g_kheap_current_used += new_used;
+        kheap_refresh_peak();
+    } else if (size == 0 && ptr != NULL) {
+        if (g_kheap_current_used >= old_used) {
+            g_kheap_current_used -= old_used;
+        } else {
+            g_kheap_current_used = 0;
+        }
+    }
+
+    kheap_unlock(key);
 
     return new_ptr;
 }
@@ -139,15 +193,21 @@ void* kheap_realloc(void* ptr, size_t size)
 void* kheap_memalign(size_t align, size_t size)
 {
     void* ptr;
+    size_t used;
+    pup_base_t key;
 
     if (g_kheap_tlsf == NULL) {
         return NULL;
     }
     
+    key = kheap_lock();
     ptr = tlsf_memalign(g_kheap_tlsf, align, size);
     if (ptr != NULL) {
+        used = tlsf_block_size(ptr);
+        g_kheap_current_used += used;
         kheap_refresh_peak();
     }
+    kheap_unlock(key);
 
     return ptr;
 }
@@ -155,15 +215,21 @@ void* kheap_memalign(size_t align, size_t size)
 void* kheap_user_malloc(size_t size)
 {
     void* ptr;
+    size_t used;
+    pup_base_t key;
 
     if (g_kheap_user_tlsf == NULL) {
         return NULL;
     }
 
+    key = kheap_lock();
     ptr = tlsf_malloc(g_kheap_user_tlsf, size);
     if (ptr != NULL) {
+        used = tlsf_block_size(ptr);
+        g_kheap_user_current_used += used;
         kheap_user_refresh_peak();
     }
+    kheap_unlock(key);
 
     return ptr;
 }
@@ -171,26 +237,43 @@ void* kheap_user_malloc(size_t size)
 void* kheap_user_memalign(size_t align, size_t size)
 {
     void* ptr;
+    size_t used;
+    pup_base_t key;
 
     if (g_kheap_user_tlsf == NULL) {
         return NULL;
     }
 
+    key = kheap_lock();
     ptr = tlsf_memalign(g_kheap_user_tlsf, align, size);
     if (ptr != NULL) {
+        used = tlsf_block_size(ptr);
+        g_kheap_user_current_used += used;
         kheap_user_refresh_peak();
     }
+    kheap_unlock(key);
 
     return ptr;
 }
 
 void kheap_user_free(void* ptr)
 {
+    pup_base_t key;
+    size_t used;
+
     if (ptr == NULL || g_kheap_user_tlsf == NULL) {
         return;
     }
 
+    key = kheap_lock();
+    used = tlsf_block_size(ptr);
     tlsf_free(g_kheap_user_tlsf, ptr);
+    if (g_kheap_user_current_used >= used) {
+        g_kheap_user_current_used -= used;
+    } else {
+        g_kheap_user_current_used = 0;
+    }
+    kheap_unlock(key);
 }
 
 size_t kheap_user_total_size(void)
@@ -200,18 +283,28 @@ size_t kheap_user_total_size(void)
 
 size_t kheap_user_used_size(void)
 {
-    size_t total_used = 0;
+    pup_base_t key;
+    size_t total_used;
 
-    if (g_kheap_user_tlsf != NULL && g_kheap_user_pool != NULL) {
-        tlsf_walk_pool(g_kheap_user_pool, kheap_walker, &total_used);
-    }
+    key = kheap_lock();
+    total_used = g_kheap_user_current_used;
+    kheap_unlock(key);
 
     return total_used;
 }
 
 size_t kheap_user_free_size(void)
 {
-    return g_kheap_user_total_size - kheap_user_used_size();
+    pup_base_t key;
+    size_t free_size;
+
+    key = kheap_lock();
+    free_size = (g_kheap_user_total_size >= g_kheap_user_current_used)
+        ? (g_kheap_user_total_size - g_kheap_user_current_used)
+        : 0;
+    kheap_unlock(key);
+
+    return free_size;
 }
 
 size_t kheap_user_peak_used_size(void)
@@ -224,29 +317,30 @@ size_t kheap_total_size(void)
     return g_kheap_total_size;
 }
 
-static void kheap_walker(void* ptr, size_t size, int used, void* user)
-{
-    size_t* total_used = (size_t*)user;
-    
-    if (used) {
-        *total_used += size;
-    }
-}
-
 size_t kheap_used_size(void)
 {
-    size_t total_used = 0;
-    
-    if (g_kheap_tlsf != NULL && g_kheap_pool != NULL) {
-        tlsf_walk_pool(g_kheap_pool, kheap_walker, &total_used);
-    }
-    
+    pup_base_t key;
+    size_t total_used;
+
+    key = kheap_lock();
+    total_used = g_kheap_current_used;
+    kheap_unlock(key);
+
     return total_used;
 }
 
 size_t kheap_free_size(void)
 {
-    return g_kheap_total_size - kheap_used_size();
+    pup_base_t key;
+    size_t free_size;
+
+    key = kheap_lock();
+    free_size = (g_kheap_total_size >= g_kheap_current_used)
+        ? (g_kheap_total_size - g_kheap_current_used)
+        : 0;
+    kheap_unlock(key);
+
+    return free_size;
 }
 
 size_t kheap_peak_used_size(void)
@@ -256,33 +350,32 @@ size_t kheap_peak_used_size(void)
 
 static void kheap_refresh_peak(void)
 {
-    size_t used = kheap_used_size();
-
-    if (used > g_kheap_peak_used) {
-        g_kheap_peak_used = used;
+    if (g_kheap_current_used > g_kheap_peak_used) {
+        g_kheap_peak_used = g_kheap_current_used;
     }
 }
 
 static void kheap_user_refresh_peak(void)
 {
-    size_t used = kheap_user_used_size();
-
-    if (used > g_kheap_user_peak_used) {
-        g_kheap_user_peak_used = used;
+    if (g_kheap_user_current_used > g_kheap_user_peak_used) {
+        g_kheap_user_peak_used = g_kheap_user_current_used;
     }
 }
 
 void kheap_dump(void)
 {
-    size_t total_used = 0;
+    pup_base_t key;
+    size_t total_used;
     
     PUP_PRINTK("Kernel Heap Dump:\n");
     PUP_PRINTK("  Total: %u bytes\n", (unsigned int)g_kheap_total_size);
     
+    key = kheap_lock();
     if (g_kheap_tlsf != NULL && g_kheap_pool != NULL) {
-        tlsf_walk_pool(g_kheap_pool, kheap_walker, &total_used);
+        total_used = g_kheap_current_used;
         PUP_PRINTK("  Used: %u bytes\n", (unsigned int)total_used);
         PUP_PRINTK("  Free: %u bytes\n", (unsigned int)(g_kheap_total_size - total_used));
         PUP_PRINTK("  Peak: %u bytes\n", (unsigned int)g_kheap_peak_used);
     }
+    kheap_unlock(key);
 }

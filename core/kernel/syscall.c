@@ -9,6 +9,7 @@
 #include "pup_console.h"
 #include "kheap.h"
 #include "pup_sem.h"
+#include "shared/pup_user_thread.h"
 #include "stack_guard.h"
 
 void syscall_uart_rx_init(void)
@@ -26,16 +27,31 @@ typedef struct {
     void* (*entry)(void*);
     void* arg;
     char* stack;
+    const char* name;
     unsigned int got_base;
 } user_thread_t;
 
 static user_thread_t user_threads[MAX_USER_THREADS];
 
 static void sys_exit_no_return(void) __attribute__((noreturn));
+static void sys_stack_guard_terminate_current_thread(const char* stage) __attribute__((noreturn));
+static long sys_exit(long arg1, long arg2, long arg3, long arg4);
 
 static void sys_exit_no_return(void) {
     while (1) {
     }
+}
+
+static void sys_stack_guard_terminate_current_thread(const char* stage) {
+    pthread_t current_thread = pthread_self();
+
+    PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
+                  "Stack overflow detected at syscall %s for thread '%s'",
+                  stage,
+                  current_thread ? pthread_getname(current_thread) : "unknown");
+
+    (void)sys_exit(-1, 0, 0, 0);
+    sys_exit_no_return();
 }
 
 static long sys_write(long arg1, long arg2, long arg3, long arg4) {
@@ -137,14 +153,35 @@ static void* user_thread_wrapper(void* arg) {
 
 static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     void* (*entry)(void*) = (void* (*)(void*))arg1;
-    void* thread_arg = (void*)arg2;
-    void* stackaddr = (void*)arg3;
-    unsigned int stacksize = (unsigned int)arg4 >> 16;
-    int priority = (int)(arg4 & 0xFFFF);
+    const pup_user_thread_create_t* params = (const pup_user_thread_create_t*)arg2;
+    void* thread_arg;
+    void* stackaddr;
+    unsigned int stacksize;
+    int priority;
+    const char* thread_name = "pthread";
     app_process_t* app = app_get_current();
+
+    if (!params) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: missing params");
+        return -1;
+    }
+
+    thread_arg = params->arg;
+    stackaddr = params->stackaddr;
+    stacksize = params->stacksize;
+    priority = params->priority;
+    if (params->name && params->name[0] != '\0') {
+        thread_name = params->name;
+    }
     
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: entry=0x%08x, arg=0x%08x, stack=0x%08x, size=%d, prio=%d", 
-               (unsigned int)entry, (unsigned int)thread_arg, (unsigned int)stackaddr, stacksize, priority);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL,
+                  "sys_thread_create: entry=0x%08x, arg=0x%08x, stack=0x%08x, size=%d, prio=%d, name=%s",
+                  (unsigned int)entry,
+                  (unsigned int)thread_arg,
+                  (unsigned int)stackaddr,
+                  stacksize,
+                  priority,
+                  thread_name);
     
     if (!stackaddr || stacksize == 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: invalid stack");
@@ -177,6 +214,7 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     user_threads[i].entry = entry;
     user_threads[i].arg = thread_arg;
     user_threads[i].stack = stackaddr;
+    user_threads[i].name = thread_name;
     user_threads[i].got_base = app ? app->image.got_base : 0;
     
     pthread_attr_t attr;
@@ -184,6 +222,7 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
     pthread_attr_setstackaddr(&attr, user_threads[i].stack);
     pthread_attr_setstacksize(&attr, stacksize);
     pthread_attr_setpriority(&attr, priority);
+    pthread_attr_setname(&attr, (char*)user_threads[i].name);
     pthread_attr_setuser(&attr, 1);
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_create: calling pthread_create");
@@ -195,6 +234,7 @@ static long sys_thread_create(long arg1, long arg2, long arg3, long arg4) {
         user_threads[i].exited = 0;
         sem_destroy(&user_threads[i].exit_sem);
         user_threads[i].thread = PUP_NULL;
+        user_threads[i].name = PUP_NULL;
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_thread_create failed: %d", ret);
         return -1;
     }
@@ -222,9 +262,13 @@ static long sys_thread_join(long arg1, long arg2, long arg3, long arg4) {
 
     thread = user_threads[thread_id].thread;
 
-    if (!user_threads[thread_id].exited) {
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: wait exit_sem for thread %d", thread_id);
-        sem_wait(&user_threads[thread_id].exit_sem);
+    if (!user_threads[thread_id].exited && !pup_thread_is_dead(thread)) {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL,
+                      "sys_thread_join: wait for thread %d to exit or be terminated",
+                      thread_id);
+        while (!user_threads[thread_id].exited && !pup_thread_is_dead(thread)) {
+            sched_yield();
+        }
     }
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "sys_thread_join: reclaim thread %d", thread_id);
@@ -239,6 +283,7 @@ static long sys_thread_join(long arg1, long arg2, long arg3, long arg4) {
         user_threads[thread_id].entry = PUP_NULL;
         user_threads[thread_id].arg = PUP_NULL;
         user_threads[thread_id].stack = PUP_NULL;
+        user_threads[thread_id].name = PUP_NULL;
         user_threads[thread_id].got_base = 0;
     }
     return ret;
@@ -448,9 +493,7 @@ long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg
     /* Check stack at syscall entry */
     pthread_t current_thread = pthread_self();
     if (pup_stack_guard_check_syscall_context(current_thread) != 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "Stack overflow detected at syscall entry for thread '%s'",
-                      pthread_getname(current_thread));
-        return -1;
+        sys_stack_guard_terminate_current_thread("entry");
     }
     
     if (arch_in_irq()) {
@@ -476,9 +519,7 @@ long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg
     
     /* Check stack at syscall exit */
     if (pup_stack_guard_check_syscall_context(current_thread) != 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "Stack overflow detected at syscall exit for thread '%s'",
-                      pthread_getname(current_thread));
-        return -1;
+        sys_stack_guard_terminate_current_thread("exit");
     }
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "Syscall %d returned: %d", (int)syscall_num, (int)result);

@@ -22,14 +22,20 @@ typedef struct {
 
 static int end_exec;
 static volatile int delay_thread_done;
+static volatile int stack_guard_thread_returned;
+static volatile unsigned int stack_guard_sink;
 
 static char pth1_stack[4096];
 static char pth2_stack[4096];
 static char delay_thread_stack[4096];
 static char sem_waiter_stack[2048];
+static char stack_guard_thread_stack[768];
 
 static volatile int sem_waiter_done;
 static int sem_test_handle = -1;
+
+#define STACK_GUARD_RECURSION_DEPTH 7
+#define STACK_GUARD_FRAME_BYTES     96
 
 static void print_usage(void);
 static int run_named_test(const char *name);
@@ -172,6 +178,81 @@ static int test_pthread_delay(void)
 
     printf("[delay_test] FAILED: delay did not work\n");
     return -1;
+}
+
+static unsigned int __attribute__((noinline)) stack_guard_recursive_burn(int depth,
+                                                                          unsigned int seed)
+{
+    volatile unsigned char frame[STACK_GUARD_FRAME_BYTES];
+    unsigned int local_seed = seed;
+
+    for (int i = 0; i < (int)sizeof(frame); i++) {
+        frame[i] = (unsigned char)(depth + i + local_seed);
+    }
+
+    stack_guard_sink += frame[depth % (int)sizeof(frame)];
+
+    if (depth == 0) {
+        sched_yield();
+    }
+
+    if (depth > 0) {
+        local_seed = stack_guard_recursive_burn(depth - 1, local_seed + frame[0]);
+    }
+
+    stack_guard_sink += frame[(depth + 17) % (int)sizeof(frame)];
+    return local_seed + frame[1];
+}
+
+static void *stack_guard_thread_func(void *arg)
+{
+    (void)arg;
+
+    printf("[stack_guard] worker start: stack=%u depth=%u frame=%u\n",
+           (unsigned int)sizeof(stack_guard_thread_stack),
+           (unsigned int)STACK_GUARD_RECURSION_DEPTH,
+           (unsigned int)STACK_GUARD_FRAME_BYTES);
+
+    stack_guard_sink = stack_guard_recursive_burn(STACK_GUARD_RECURSION_DEPTH, 0x5aU);
+    stack_guard_thread_returned = 1;
+
+    printf("[stack_guard] recursion returned unexpectedly, sink=%u\n", stack_guard_sink);
+    return NULL;
+}
+
+static int test_stack_guard_recursion(void)
+{
+    pthread_t thread;
+    pthread_attr_t attr;
+
+    printf("\n=== Recursive Stack Guard Test ===\n");
+
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, sizeof(stack_guard_thread_stack));
+    pthread_attr_setstackaddr(&attr, stack_guard_thread_stack);
+    pthread_attr_setname(&attr, "recurse_ovf");
+
+    stack_guard_thread_returned = 0;
+    stack_guard_sink = 0;
+
+    if (pthread_create(&thread, &attr, stack_guard_thread_func, NULL) != 0) {
+        printf("[stack_guard] create thread failed\n");
+        return -1;
+    }
+
+    if (pthread_join(thread, NULL) != 0) {
+        printf("[stack_guard] join failed\n");
+        return -1;
+    }
+
+    if (stack_guard_thread_returned) {
+        printf("[stack_guard] FAILED: recursion returned normally, sink=%u\n", stack_guard_sink);
+        return -1;
+    }
+
+    printf("[stack_guard] PASSED: worker thread was terminated before returning\n");
+    printf("[stack_guard] expected kernel log: stack guard violated for thread 'recurse_ovf'\n");
+    return 0;
 }
 
 static int test_mpu(void)
@@ -486,6 +567,7 @@ static int test_spi_flash_id(void)
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
+    {"stack", "Trigger recursive stack pressure and expect guard kill", test_stack_guard_recursion},
     {"mpu", "Show why MPU test stays in kernel", test_mpu},
     {"devfs", "Test device file system", test_devfs},
     {"romfs", "Test ROMFS file listing", test_romfs},

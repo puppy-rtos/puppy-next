@@ -647,6 +647,16 @@ pup_size_t pup_thread_get_kernel_stacksize(pthread_t thread) {
     return pthread_obj->kernel_stacksize;
 }
 
+int pup_thread_is_dead(pthread_t thread) {
+    struct _pthread_obj* pthread_obj = thread;
+
+    if (!pthread_obj) {
+        return 1;
+    }
+
+    return pthread_obj->state == PUP_THREAD_STATE_DEAD;
+}
+
 pthread_t pup_thread_next(void) {
     return pup_cpu_self()->next_thread;
 }

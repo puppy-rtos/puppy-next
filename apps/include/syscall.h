@@ -3,6 +3,7 @@
 
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
+#include "shared/pup_user_thread.h"
 
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
@@ -62,11 +63,13 @@ static inline void sys_yield(void) {
     syscall(SYS_YIELD, 0, 0, 0, 0);
 }
 
-static inline int thread_create(void* (*entry)(void*), void* arg,
-                                void* stackaddr, unsigned int stacksize,
-                                int priority) {
-    return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)arg,
-                        (long)stackaddr, (long)((stacksize << 16) | (priority & 0xFFFF)));
+static inline int thread_create(void* (*entry)(void*),
+                                const pup_user_thread_create_t* params) {
+    if (!params) {
+        return -1;
+    }
+
+    return (int)syscall(SYS_THREAD_CREATE, (long)entry, (long)params, 0, 0);
 }
 
 static inline int thread_join(int thread_id) {

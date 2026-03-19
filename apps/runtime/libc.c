@@ -46,12 +46,18 @@ int pthread_attr_setpriority(pthread_attr_t* attr, int priority) {
 
 int pthread_create(pthread_t* thread, pthread_attr_t* attr, 
                    void* (*start_routine)(void*), void* arg) {
+    pup_user_thread_create_t params;
+
     if (!thread || !attr || !start_routine) return -1;
     if (!attr->stackaddr) return -1;
-    
-    int tid = thread_create(start_routine, arg,
-                            attr->stackaddr, attr->stacksize,
-                            attr->priority);
+
+    params.arg = arg;
+    params.stackaddr = attr->stackaddr;
+    params.stacksize = attr->stacksize;
+    params.priority = attr->priority;
+    params.name = attr->name;
+
+    int tid = thread_create(start_routine, &params);
     if (tid < 0) return -1;
     
     *thread = (pthread_t)(intptr_t)tid;

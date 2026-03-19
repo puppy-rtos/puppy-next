@@ -172,6 +172,7 @@ void* pup_thread_get_stackaddr(pthread_t thread);
 pup_size_t pup_thread_get_stacksize(pthread_t thread);
 void* pup_thread_get_kernel_stackaddr(pthread_t thread);
 pup_size_t pup_thread_get_kernel_stacksize(pthread_t thread);
+int pup_thread_is_dead(pthread_t thread);
 
 /**@}*/
 

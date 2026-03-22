@@ -287,6 +287,82 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack addr: 0x%08x, size: %d", header->stack_addr, USER_APP_STACK_SIZE);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Load offset: 0x%08x", load_offset);
     
+    /* Calculate app actual memory usage (not the allocated size)
+     * ram_image_size is the actual app RAM usage including stack */
+    uint32_t app_actual_size = ram_image_size;
+    uint32_t app_actual_end = ram_base + app_actual_size;  /* Actual end, NOT aligned */
+    
+    /* Calculate precise MPU configuration using two overlapping regions
+     * - Front region: aligned to 32KB, covers app start
+     * - Back region: aligned to 32KB based on app_end, can overlap with front
+     * - Two regions overlap to precisely cover app actual range [ram_base, app_actual_end)
+     * - app_actual_end is the ACTUAL end (not aligned), only ram_base is aligned
+     */
+    uint32_t region_size = 32768;  /* 32KB */
+    uint32_t subregion_size = 4096; /* 4KB */
+    uint32_t f_base = ram_base & ~(region_size - 1);  /* Align to 32KB */
+    uint32_t b_base = app_actual_end & ~(region_size - 1);  /* Align app_end down to 32KB */
+    
+    /* If back region base equals front, shift to create overlap */
+    if (b_base == f_base) {
+        b_base = f_base + subregion_size * 4;  /* 16KB offset for overlap */
+    }
+    
+    /* Calculate front sub-region mask
+     * Enable sub-regions that overlap with [ram_base, app_actual_end) */
+    uint32_t f_sub_mask = 0;
+    char f_sub_map[9] = {0};
+    for (int i = 0; i < 8; i++) {
+        uint32_t subregion_start = f_base + i * subregion_size;
+        uint32_t subregion_end = subregion_start + subregion_size;
+        /* Overlap condition: subregion_start < app_actual_end AND subregion_end > ram_base */
+        int overlaps = (subregion_start < app_actual_end) && (subregion_end > ram_base);
+        if (!overlaps) {
+            f_sub_mask |= (1 << i);
+            f_sub_map[i] = (subregion_end <= ram_base) ? 'x' : 'X';  /* x=before, X=after */
+        } else {
+            f_sub_map[i] = 'o';  /* Enabled */
+        }
+    }
+    f_sub_map[8] = '\0';
+
+    /* Calculate back sub-region mask
+     * Enable sub-regions that overlap with [ram_base, app_actual_end) */
+    uint32_t b_sub_mask = 0;
+    char b_sub_map[9] = {0};
+    for (int i = 0; i < 8; i++) {
+        uint32_t subregion_start = b_base + i * subregion_size;
+        uint32_t subregion_end = subregion_start + subregion_size;
+        /* Overlap condition: subregion_start < app_actual_end AND subregion_end > ram_base */
+        int overlaps = (subregion_start < app_actual_end) && (subregion_end > ram_base);
+        if (!overlaps) {
+            b_sub_mask |= (1 << i);
+            b_sub_map[i] = (subregion_end <= ram_base) ? 'x' : 'X';  /* x=before, X=after */
+        } else {
+            b_sub_map[i] = 'o';  /* Enabled */
+        }
+    }
+    b_sub_map[8] = '\0';
+
+    /* Print app memory layout and precise MPU configuration */
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "=== App Memory Layout ===");
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  RAM:   0x%08x - 0x%08x (%d bytes, allocated)",
+                 ram_base, ram_base + ram_size, ram_size);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Actual: 0x%08x - 0x%08x (%d bytes, used)",
+                 ram_base, app_actual_end, app_actual_size);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Stack: 0x%08x - 0x%08x (%d bytes)",
+                 (unsigned int)app->stack_addr, (unsigned int)app->stack_addr + USER_APP_STACK_SIZE, USER_APP_STACK_SIZE);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "=== Precise MPU Regions (Dual Overlapping) ===");
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [ALLOW] App Actual: 0x%08x - 0x%08x (RWX)", ram_base, app_actual_end);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Front Region: 0x%08x - 0x%08x (%dKB, sub: %s, mask=0x%02x)",
+                 f_base, f_base + region_size, region_size / 1024, f_sub_map, f_sub_mask);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Back Region:  0x%08x - 0x%08x (%dKB, sub: %s, mask=0x%02x)",
+                 b_base, b_base + region_size, region_size / 1024, b_sub_map, b_sub_mask);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Note: Regions overlap to cover actual range [%08x, %08x)",
+                 ram_base, app_actual_end);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [ALLOW] Flash:    0x%08x - 0x%08x (RX)", 0x08000000, 0x08100000);
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [DENY]  Kernel:   0x%08x - 0x%08x (Privileged only)", 0x20000000, 0x20010000);
+    
     if (data_size > 0) {
         PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Initializing .data segment...");
         PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "data_start=0x%08x, data_end=0x%08x, data_load=0x%08x", 
@@ -402,8 +478,11 @@ static void* user_app_thread(void* arg) {
     user_app_exit_code = 0;
     user_app_should_exit = 0;
     
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up MPU protection for user app");
-    pup_mpu_setup_user_protection();
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up dynamic MPU protection for app");
+    /* Setup MPU protection based on this app's actual memory usage
+     * Use compiled_ram_end to calculate actual size, not the allocated ram_size */
+    uint32_t app_actual_size = app->compiled_ram_end - app->compiled_ram_start;
+    pup_mpu_setup_app_protection(app->ram_base, app_actual_size);
     
     extern void user_app_start(unsigned int got_base, void* entry, void* entry_arg);
     

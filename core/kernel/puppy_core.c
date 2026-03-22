@@ -10,6 +10,7 @@
 #include "kheap.h"
 #include "app_manager.h"
 #include "stack_guard.h"
+#include "mpu.h"
 
 #ifdef PUP_DEBUG
 #define PUP_SCHED_GUARD_ENABLED 1
@@ -326,12 +327,16 @@ void pup_sched_swap_done_cb(void) {
     cpu->next_thread->state = PUP_THREAD_STATE_RUN;
     cpu->curr_thread = cpu->next_thread;
     
-    /* Check for stack overflow after thread switch */
     if (pup_stack_guard_check(cpu->curr_thread) != 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SCHED, "Stack guard violation detected, terminating thread '%s'", 
                       cpu->curr_thread->attr.name);
         cpu->curr_thread->state = PUP_THREAD_STATE_DEAD;
     }
+    
+    /* MPU protection is set up when app starts, not during context switch
+     * This avoids complex MPU operations in interrupt context
+     */
+    (void)cpu;
     
     cpu->next_thread = PUP_NULL;
 }

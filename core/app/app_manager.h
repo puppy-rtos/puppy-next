@@ -3,9 +3,10 @@
 
 #include <puppy_core.h>
 #include "app_loader.h"
+#include "mpu.h"
 
 #define APP_NAME_MAX_LEN        32
-#define APP_MEMORY_ALIGN        8
+#define APP_MEMORY_ALIGN        4096  /* Align to 4KB for MPU subregion boundary */
 #define APP_STACK_SIZE          (8 * 1024)
 #define APP_EXEC_ARG_AREA_SIZE  256
 
@@ -34,6 +35,7 @@ typedef struct app_process {
     pthread_t thread;
     int exit_code;
     user_app_t image;
+    struct pup_mpu_info mpu_info;
     struct app_process* next;
 } app_process_t;
 
@@ -51,6 +53,7 @@ int app_find_by_name(const char* name);
 app_process_t* app_get_by_pid(int pid);
 app_process_t* app_get_current(void);
 app_process_t* app_find_by_thread(pthread_t thread);
+app_process_t* app_get_all_running(int *count);
 int app_set_state(int pid, int state);
 int app_get_state(int pid);
 void app_list(void);

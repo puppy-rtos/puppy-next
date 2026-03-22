@@ -195,6 +195,24 @@ app_process_t* app_find_by_thread(pthread_t thread) {
     return NULL;
 }
 
+static app_process_t g_running_apps_buffer[16];
+
+app_process_t* app_get_all_running(int *count) {
+    int running_count = 0;
+    app_process_t* app = g_app_list;
+    
+    while (app && running_count < 16) {
+        if (app->state == APP_STATE_RUNNING && app->memory_base != 0) {
+            g_running_apps_buffer[running_count] = *app;
+            running_count++;
+        }
+        app = app->next;
+    }
+    
+    *count = running_count;
+    return g_running_apps_buffer;
+}
+
 int app_set_state(int pid, int state) {
     app_process_t* app = app_get_by_pid(pid);
     

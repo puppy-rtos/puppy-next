@@ -116,6 +116,10 @@ static long sys_exit(long arg1, long arg2, long arg3, long arg4) {
         app->thread = PUP_NULL;
         PUP_LOG_DEBUG(PUP_LOG_MODULE_SYSCALL, "App '%s' (pid=%d) exiting with code %d",
                       app->name, app->pid, exit_code);
+        
+        /* Restore kernel MPU protection when app exits
+         * This ensures the next app or shell runs with correct MPU config */
+        pup_mpu_setup_kernel_protection();
     }
     
     pthread_exit((void*)exit_code);

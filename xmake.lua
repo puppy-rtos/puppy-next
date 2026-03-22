@@ -107,13 +107,14 @@ end
 define_user_app_target("hello", "apps/hello/main.c", "hello.bin")
 define_user_app_target("shell", "apps/shell/main.c", "shell.bin")
 define_user_app_target("test", "apps/test/main.c", "test.bin")
+define_user_app_target("mpu_test", "apps/mpu_test/main.c", "mpu_test.bin")
 
 target("firmware")
     set_kind("phony")
     set_toolchains("arm-none-eabi")
     set_arch("cortex-m4")
     set_plat("cross")
-    add_deps("puppy", "hello", "shell", "test")
+    add_deps("puppy", "hello", "shell", "test", "mpu_test")
     
     after_build(function (target)
         local mode = is_mode("debug") and "debug" or "release"

@@ -1,148 +1,72 @@
-#include "dtm_bindings.h"
-
-#ifdef DTM_BINFDING_MPU_ARM_M4_ST_GD
 #include "dtm_mpu.h"
-#include <default_config.h>
+#include "puppy_log.h"
+#include <string.h>
 
-#define ARM_MPU_REGION_SIZE_32B      ((uint8_t)0x04U)
-#define ARM_MPU_REGION_SIZE_64B      ((uint8_t)0x05U)
-#define ARM_MPU_REGION_SIZE_128B     ((uint8_t)0x06U)
-#define ARM_MPU_REGION_SIZE_256B     ((uint8_t)0x07U)
-#define ARM_MPU_REGION_SIZE_512B     ((uint8_t)0x08U)
-#define ARM_MPU_REGION_SIZE_1KB      ((uint8_t)0x09U)
-#define ARM_MPU_REGION_SIZE_2KB      ((uint8_t)0x0AU)
-#define ARM_MPU_REGION_SIZE_4KB      ((uint8_t)0x0BU)
-#define ARM_MPU_REGION_SIZE_8KB      ((uint8_t)0x0CU)
-#define ARM_MPU_REGION_SIZE_16KB     ((uint8_t)0x0DU)
-#define ARM_MPU_REGION_SIZE_32KB     ((uint8_t)0x0EU)
-#define ARM_MPU_REGION_SIZE_64KB     ((uint8_t)0x0FU)
-#define ARM_MPU_REGION_SIZE_128KB    ((uint8_t)0x10U)
-#define ARM_MPU_REGION_SIZE_256KB    ((uint8_t)0x11U)
-#define ARM_MPU_REGION_SIZE_512KB    ((uint8_t)0x12U)
-#define ARM_MPU_REGION_SIZE_1MB      ((uint8_t)0x13U)
-#define ARM_MPU_REGION_SIZE_2MB      ((uint8_t)0x14U)
-#define ARM_MPU_REGION_SIZE_4MB      ((uint8_t)0x15U)
-#define ARM_MPU_REGION_SIZE_8MB      ((uint8_t)0x16U)
-#define ARM_MPU_REGION_SIZE_16MB     ((uint8_t)0x17U)
-#define ARM_MPU_REGION_SIZE_32MB     ((uint8_t)0x18U)
-#define ARM_MPU_REGION_SIZE_64MB     ((uint8_t)0x19U)
-#define ARM_MPU_REGION_SIZE_128MB    ((uint8_t)0x1AU)
-#define ARM_MPU_REGION_SIZE_256MB    ((uint8_t)0x1BU)
-#define ARM_MPU_REGION_SIZE_512MB    ((uint8_t)0x1CU)
-#define ARM_MPU_REGION_SIZE_1GB      ((uint8_t)0x1DU)
-#define ARM_MPU_REGION_SIZE_2GB      ((uint8_t)0x1EU)
-#define ARM_MPU_REGION_SIZE_4GB      ((uint8_t)0x1FU)
+/* ARM Cortex-M barrier instructions */
+#define __DSB() __asm__ volatile ("dsb" ::: "memory")
+#define __ISB() __asm__ volatile ("isb" ::: "memory")
+#define __DMB() __asm__ volatile ("dmb" ::: "memory")
 
-#define ARM_MPU_AP_NONE 0U
-#define ARM_MPU_AP_PRIV 1U
-#define ARM_MPU_AP_URO  2U
-#define ARM_MPU_AP_FULL 3U
-#define ARM_MPU_AP_PRO  5U
-#define ARM_MPU_AP_RO   6U
+#define DTM_MPU ((DTM_MPU_Type *)DTM_MPU_BASE)
+#define DTM_SCB ((DTM_SCB_Type *)DTM_SCB_BASE)
 
-typedef struct {
-    volatile uint32_t TYPE;
-    volatile uint32_t CTRL;
-    volatile uint32_t RNR;
-    volatile uint32_t RBAR;
-    volatile uint32_t RASR;
-    volatile uint32_t RBAR_A1;
-    volatile uint32_t RASR_A1;
-    volatile uint32_t RBAR_A2;
-    volatile uint32_t RASR_A2;
-    volatile uint32_t RBAR_A3;
-    volatile uint32_t RASR_A3;
-} DTM_MPU_Type;
+#define DTM_MPU_TYPE_SEPARATE_Msk           (1UL)
 
-#define DTM_MPU_BASE            (0xE000ED90UL)
-#define DTM_MPU                 ((DTM_MPU_Type *)DTM_MPU_BASE)
-
-#define DTM_MPU_CTRL_ENABLE_Msk             (1UL << 0UL)
+#define DTM_MPU_CTRL_ENABLE_Msk             (1UL)
 #define DTM_MPU_CTRL_HFNMIENA_Msk           (1UL << 1UL)
 #define DTM_MPU_CTRL_PRIVDEFENA_Msk         (1UL << 2UL)
 
-#define DTM_MPU_RBAR_REGION_Msk             (0xFUL << 0UL)
+#define DTM_MPU_RBAR_REGION_Msk             (0xFUL)
+#define DTM_MPU_RBAR_REGION_Pos             (0U)
 #define DTM_MPU_RBAR_VALID_Msk              (1UL << 4UL)
+#define DTM_MPU_RBAR_VALID_Pos              (4U)
 #define DTM_MPU_RBAR_ADDR_Msk               (0xFFFFFFE0UL)
+#define DTM_MPU_RBAR_ADDR_Pos               (5U)
 
-#define DTM_MPU_RASR_ENABLE_Msk             (1UL << 0UL)
-#define DTM_MPU_RASR_SIZE_Pos               1UL
-#define DTM_MPU_RASR_SIZE_Msk               (0x1FUL << DTM_MPU_RASR_SIZE_Pos)
-#define DTM_MPU_RASR_SRD_Pos                8UL
+#define DTM_MPU_RASR_ENABLE_Msk             (1UL)
+
+#define DTM_MPU_RASR_SIZE_Pos               (1U)
+#define DTM_MPU_RASR_SIZE_Msk               (0x1EUL << DTM_MPU_RASR_SIZE_Pos)
+
+#define DTM_MPU_RASR_SRD_Pos                (8U)
 #define DTM_MPU_RASR_SRD_Msk                (0xFFUL << DTM_MPU_RASR_SRD_Pos)
-#define DTM_MPU_RASR_B_Pos                  16UL
-#define DTM_MPU_RASR_B_Msk                  (1UL << DTM_MPU_RASR_B_Pos)
-#define DTM_MPU_RASR_C_Pos                  17UL
-#define DTM_MPU_RASR_C_Msk                  (1UL << DTM_MPU_RASR_C_Pos)
-#define DTM_MPU_RASR_S_Pos                  18UL
-#define DTM_MPU_RASR_S_Msk                  (1UL << DTM_MPU_RASR_S_Pos)
-#define DTM_MPU_RASR_TEX_Pos                19UL
-#define DTM_MPU_RASR_TEX_Msk                (0x7UL << DTM_MPU_RASR_TEX_Pos)
-#define DTM_MPU_RASR_AP_Pos                 24UL
-#define DTM_MPU_RASR_AP_Msk                 (0x7UL << DTM_MPU_RASR_AP_Pos)
-#define DTM_MPU_RASR_XN_Pos                 28UL
+
+#define DTM_MPU_RASR_ATTR_Pos               (16U)
+#define DTM_MPU_RASR_ATTR_Msk               (0xFFFFUL << DTM_MPU_RASR_ATTR_Pos)
+
+#define DTM_MPU_RASR_XN_Pos                 (28U)
 #define DTM_MPU_RASR_XN_Msk                 (1UL << DTM_MPU_RASR_XN_Pos)
 
-typedef struct {
-    uint32_t RBAR;
-    uint32_t RASR;
-} DTM_ARM_MPU_Region_t;
+#define DTM_MPU_RASR_AP_Pos                 (24U)
+#define DTM_MPU_RASR_AP_Msk                 (7UL << DTM_MPU_RASR_AP_Pos)
 
-#define DTM_ARM_MPU_RBAR(Region, BaseAddress) \
-    (((BaseAddress) & DTM_MPU_RBAR_ADDR_Msk) |  \
-     ((Region) & DTM_MPU_RBAR_REGION_Msk) |  \
-     (DTM_MPU_RBAR_VALID_Msk))
+#define DTM_MPU_RASR_TEX_Pos                (19U)
+#define DTM_MPU_RASR_TEX_Msk                (7UL << DTM_MPU_RASR_TEX_Pos)
 
-#define DTM_ARM_MPU_ACCESS_(TypeExtField, IsShareable, IsCacheable, IsBufferable)   \
-    ((((TypeExtField) << DTM_MPU_RASR_TEX_Pos) & DTM_MPU_RASR_TEX_Msk)                  | \
-     (((IsShareable)  << DTM_MPU_RASR_S_Pos)   & DTM_MPU_RASR_S_Msk)                    | \
-     (((IsCacheable)  << DTM_MPU_RASR_C_Pos)   & DTM_MPU_RASR_C_Msk)                    | \
-     (((IsBufferable) << DTM_MPU_RASR_B_Pos)   & DTM_MPU_RASR_B_Msk))
+#define DTM_MPU_RASR_S_Pos                  (18U)
+#define DTM_MPU_RASR_S_Msk                  (1UL << DTM_MPU_RASR_S_Pos)
 
-#define DTM_ARM_MPU_RASR_EX(DisableExec, AccessPermission, AccessAttributes, SubRegionDisable, Size)    \
-    ((((DisableExec)      << DTM_MPU_RASR_XN_Pos)   & DTM_MPU_RASR_XN_Msk)                                  | \
-     (((AccessPermission) << DTM_MPU_RASR_AP_Pos)   & DTM_MPU_RASR_AP_Msk)                                  | \
-     (((AccessAttributes) & (DTM_MPU_RASR_TEX_Msk | DTM_MPU_RASR_S_Msk | DTM_MPU_RASR_C_Msk | DTM_MPU_RASR_B_Msk))) | \
-     (((SubRegionDisable) << DTM_MPU_RASR_SRD_Pos)  & DTM_MPU_RASR_SRD_Msk)                                 | \
-     (((Size)             << DTM_MPU_RASR_SIZE_Pos) & DTM_MPU_RASR_SIZE_Msk)                                | \
-     (((DTM_MPU_RASR_ENABLE_Msk))))
+#define DTM_MPU_RASR_C_Pos                  (17U)
+#define DTM_MPU_RASR_C_Msk                  (1UL << DTM_MPU_RASR_C_Pos)
 
-#define DTM_ARM_MPU_RASR(DisableExec, AccessPermission, TypeExtField, IsShareable, IsCacheable, IsBufferable, SubRegionDisable, Size) \
-    DTM_ARM_MPU_RASR_EX(DisableExec, AccessPermission, DTM_ARM_MPU_ACCESS_(TypeExtField, IsShareable, IsCacheable, IsBufferable), SubRegionDisable, Size)
+#define DTM_MPU_RASR_B_Pos                  (16U)
+#define DTM_MPU_RASR_B_Msk                  (1UL << DTM_MPU_RASR_B_Pos)
 
-typedef struct {
-    volatile uint32_t CPUID;
-    volatile uint32_t ICSR;
-    volatile uint32_t VTOR;
-    volatile uint32_t AIRCR;
-    volatile uint32_t SCR;
-    volatile uint32_t CCR;
-    volatile uint32_t SHPR[3U];
-    volatile uint32_t SHCSR;
-    volatile uint32_t CFSR;
-    volatile uint32_t HFSR;
-    volatile uint32_t DFSR;
-    volatile uint32_t MMFAR;
-    volatile uint32_t BFAR;
-} DTM_SCB_Type;
+#define DTM_SCB_SHCSR_MEMFAULTENA_Msk       (1UL << 16UL)
 
-#define DTM_SCS_BASE            (0xE000E000UL)
-#define DTM_SCB_BASE            (DTM_SCS_BASE +  0x0D00UL)
-#define DTM_SCB                 ((DTM_SCB_Type       *)     DTM_SCB_BASE)
+#define DTM_MPU_SUB_REGION_CNT 8
 
-#define DTM_SCB_SHCSR_MEMFAULTENA_Msk      (1UL << 16)
+#define DTM_ARM_MPU_RBAR(region, base) \
+    (((base) & DTM_MPU_RBAR_ADDR_Msk) | \
+     ((region) & DTM_MPU_RBAR_REGION_Msk) | \
+     DTM_MPU_RBAR_VALID_Msk)
 
-static inline void __DSB(void) {
-    __asm volatile("dsb" ::: "memory");
-}
-
-static inline void __ISB(void) {
-    __asm volatile("isb" ::: "memory");
-}
-
-static inline void __DMB(void) {
-    __asm volatile("dmb" ::: "memory");
-}
+#define DTM_ARM_MPU_RASR(xn, ap, tex, s, c, b, srd, size) \
+    ((srd << DTM_MPU_RASR_SRD_Pos) | \
+     (size << DTM_MPU_RASR_SIZE_Pos) | \
+     (ap << DTM_MPU_RASR_AP_Pos) | \
+     (xn << DTM_MPU_RASR_XN_Pos) | \
+     DTM_MPU_RASR_ENABLE_Msk)
 
 static inline void ARM_MPU_Enable(uint32_t MPU_Control) {
     DTM_MPU->CTRL = MPU_Control | DTM_MPU_CTRL_ENABLE_Msk;
@@ -173,45 +97,15 @@ static inline void ARM_MPU_SetRegionEx(uint32_t rnr, uint32_t rbar, uint32_t ras
     DTM_MPU->RASR = rasr;
 }
 
-static inline uint32_t dtm_ffs(uint32_t x) {
-    if (x == 0) return 0;
-    uint32_t pos = 0;
-    while ((x & 1) == 0) {
-        x >>= 1;
-        pos++;
+static uint32_t dtm_ffs(uint32_t val) {
+    uint32_t i = 0;
+    while (i < 32 && !(val & (1 << i))) {
+        i++;
     }
-    return pos;
-}
-
-static uint32_t mpu_align_min(uint32_t map_size) {
-    if (map_size == 0) return 32;
-    
-    uint32_t size = 1;
-    while (size < map_size) {
-        size <<= 1;
-    }
-    
-    if (size < 32) size = 32;
-    
-    return size;
+    return i;
 }
 
 int dtm_mpu_init(void) {
-    uint32_t type = DTM_MPU->TYPE;
-    uint8_t num_regions = (type >> 8) & 0xFF;
-    
-    if (num_regions == 0) {
-        return -1;
-    }
-    
-    dtm_mpu_disable();
-    
-    for (int i = 0; i < num_regions; i++) {
-        ARM_MPU_ClrRegion(i);
-    }
-    
-    dtm_mpu_enable();
-    
     return 0;
 }
 
@@ -223,139 +117,295 @@ void dtm_mpu_disable(void) {
     ARM_MPU_Disable();
 }
 
-int dtm_mpu_region_set(uint32_t region_num, uint32_t base_addr, 
-                       uint32_t size, uint32_t attributes) {
+static uint32_t dtm_mpu_size_to_encode(uint32_t size) {
+    uint32_t encode = 4;
+    while ((1U << (encode + 1)) < size && encode < 31) {
+        encode++;
+    }
+    return encode;
+}
+
+static uint32_t dtm_mpu_align_addr(uint32_t addr, uint32_t size) {
+    return addr & ~(size - 1);
+}
+
+int dtm_mpu_region_set(uint32_t region_num, uint32_t base_addr, uint32_t size, uint32_t attributes) {
     uint32_t rasr;
     uint32_t size_encode;
-    uint32_t ap;
-    uint32_t xn;
-    
-    if (region_num >= DTM_MPU_MAX_REGIONS) {
-        return -1;
+    uint32_t xn = 0;
+    uint32_t ap = ARM_MPU_AP_FULL;
+    uint32_t srd = 0;
+
+    if (size < 32) {
+        size = 32;
     }
-    
-    uint32_t align_size = mpu_align_min(size);
-    uint32_t aligned_addr = base_addr & ~(align_size - 1);
-    
-    size_encode = dtm_ffs(align_size) - 1;
-    
-    if (attributes & DTM_MPU_ATT_FULL) {
-        ap = ARM_MPU_AP_FULL;
-    } else if (attributes & DTM_MPU_ATT_WRITE) {
-        ap = ARM_MPU_AP_FULL;
-    } else if (attributes & DTM_MPU_ATT_READ) {
-        ap = ARM_MPU_AP_URO;
-    } else {
-        ap = ARM_MPU_AP_NONE;
-    }
-    
-    xn = 0;
+
+    size_encode = dtm_mpu_size_to_encode(size);
+    base_addr = dtm_mpu_align_addr(base_addr, 1 << (size_encode + 1));
+
     if (!(attributes & DTM_MPU_ATT_EXEC)) {
         xn = 1;
     }
-    
-    rasr = DTM_ARM_MPU_RASR(xn, ap, 0UL, 1UL, 1UL, 1UL, 0UL, size_encode);
-    
-    ARM_MPU_SetRegionEx(region_num, DTM_ARM_MPU_RBAR(region_num, aligned_addr), rasr);
-    
+
+    if (attributes == DTM_MPU_ATT_NONE) {
+        ap = ARM_MPU_AP_NONE;
+    } else if (attributes == (DTM_MPU_ATT_READ | DTM_MPU_ATT_EXEC)) {
+        ap = ARM_MPU_AP_URO;
+    }
+
+    rasr = DTM_ARM_MPU_RASR(xn, ap, 0, 0, 1, 1, srd, size_encode);
+    ARM_MPU_SetRegionEx(region_num, DTM_ARM_MPU_RBAR(region_num, base_addr), rasr);
+
     return 0;
 }
 
 void dtm_mpu_region_clear(uint32_t region_num) {
-    if (region_num >= DTM_MPU_MAX_REGIONS) {
-        return;
-    }
     ARM_MPU_ClrRegion(region_num);
 }
 
 void dtm_mpu_load_regions(struct dtm_mpu_info *mpu_info) {
     int i;
-    
-    if (!mpu_info) return;
-    
-    dtm_mpu_disable();
-    
     for (i = 0; i < DTM_MPU_MAX_REGIONS; i++) {
-        struct dtm_mpu_region *region = &mpu_info->regions[i];
-        if (region->valid == DTM_MPU_REGION_VALID && region->user_data) {
-            DTM_ARM_MPU_Region_t *mpu_reg = (DTM_ARM_MPU_Region_t *)region->user_data;
-            ARM_MPU_SetRegionEx(i, mpu_reg->RBAR, mpu_reg->RASR);
-        } else {
-            ARM_MPU_ClrRegion(i);
+        if (mpu_info->regions[i].valid == DTM_MPU_REGION_VALID) {
+            dtm_mpu_region_set(i,
+                               (uint32_t)mpu_info->regions[i].addr,
+                               mpu_info->regions[i].size,
+                               mpu_info->regions[i].attribute);
         }
     }
-    
-    dtm_mpu_enable();
 }
 
 void dtm_mpu_clear_regions(struct dtm_mpu_info *mpu_info) {
     int i;
-    
-    if (!mpu_info) return;
-    
-    dtm_mpu_disable();
-    
     for (i = 0; i < DTM_MPU_MAX_REGIONS; i++) {
-        if (mpu_info->regions[i].valid == DTM_MPU_REGION_VALID) {
-            ARM_MPU_ClrRegion(i);
-        }
+        ARM_MPU_ClrRegion(i);
     }
-    
-    dtm_mpu_enable();
 }
 
 void dtm_mpu_dump(void) {
     int i;
-    
+    PUP_LOG_INFO(PUP_LOG_MODULE_MPU, "MPU Configuration:");
     for (i = 0; i < DTM_MPU_MAX_REGIONS; i++) {
         DTM_MPU->RNR = i;
+        uint32_t rbar = DTM_MPU->RBAR;
         uint32_t rasr = DTM_MPU->RASR;
-        
         if (rasr & DTM_MPU_RASR_ENABLE_Msk) {
-            (void)i;
+            uint32_t base = rbar & DTM_MPU_RBAR_ADDR_Msk;
+            uint32_t size_encode = (rasr & DTM_MPU_RASR_SIZE_Msk) >> DTM_MPU_RASR_SIZE_Pos;
+            uint32_t size = 1 << (size_encode + 1);
+            uint32_t srd = (rasr & DTM_MPU_RASR_SRD_Msk) >> DTM_MPU_RASR_SRD_Pos;
+            PUP_LOG_INFO(PUP_LOG_MODULE_MPU, "  Region %d: 0x%08x - 0x%08x (SRD=0x%02x)",
+                         i, base, base + size, srd);
         }
     }
 }
 
 int dtm_mpu_setup_kernel_protection(void) {
     dtm_mpu_disable();
-    
+
     dtm_mpu_region_set(0, DTM_MPU_KERNEL_FLASH_BASE, 1024 * 1024,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_EXEC);
-    
-    dtm_mpu_region_set(1, 0x20000000, 512 * 1024,
+
+    uint32_t rasr;
+    uint32_t size_encode = ARM_MPU_REGION_SIZE_64KB;
+    rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_FULL, 0UL, 1UL, 1UL, 1UL, 0UL, size_encode);
+    ARM_MPU_SetRegionEx(1, DTM_ARM_MPU_RBAR(1, DTM_MPU_KERNEL_RAM_BASE), rasr);
+
+    dtm_mpu_region_set(2, DTM_MPU_USER_RAM_BASE, DTM_MPU_USER_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
-    
+
+    dtm_mpu_region_set(3, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
+
     dtm_mpu_enable();
-    
-    dtm_mpu_dump();
-    
+
     return 0;
 }
 
 int dtm_mpu_setup_user_protection(void) {
     dtm_mpu_disable();
-    
+
     dtm_mpu_region_set(0, DTM_MPU_KERNEL_FLASH_BASE, 1024 * 1024,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_EXEC);
-    
+
     uint32_t rasr;
     uint32_t size_encode = ARM_MPU_REGION_SIZE_64KB;
     rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_PRIV, 0UL, 1UL, 1UL, 1UL, 0UL, size_encode);
     ARM_MPU_SetRegionEx(1, DTM_ARM_MPU_RBAR(1, DTM_MPU_KERNEL_RAM_BASE), rasr);
-    
+
     dtm_mpu_region_set(2, DTM_MPU_USER_RAM_BASE, DTM_MPU_USER_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
-    
-    // 配置共享堆区域
+
     dtm_mpu_region_set(3, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
-    
+
     dtm_mpu_enable();
-    
-    dtm_mpu_dump();
-    
+
     return 0;
 }
 
-#endif /* DTM_BINFDING_MPU_ARM_M4_ST_GD */
+/* Calculate minimum subregion alignment size for MPU
+ * MPU region size must be power of 2, minimum 32 bytes
+ * Subregion size = region_size / 8
+ * This function returns the minimum subregion size that can cover the app
+ */
+static uint32_t dtm_mpu_calc_min_subregion_size(uint32_t app_size)
+{
+    uint32_t subregion_size = 32;  /* Minimum 32 bytes */
+    
+    /* Find the smallest subregion size that can cover the app
+     * Region size = subregion_size * 8, must be >= app_size + alignment margin
+     */
+    while (subregion_size * 8 < app_size + subregion_size * 8) {
+        subregion_size <<= 1;
+        if (subregion_size >= 4096) break;  /* Max 4KB subregions (32KB region) */
+    }
+    
+    return subregion_size;
+}
+
+/* Configure MPU region with sub-region masking
+ * Uses two regions (front and back) to precisely match app RAM range
+ * 
+ * Strategy:
+ * - Only align app_base to subregion boundary (4KB for 32KB region)
+ * - app_end keeps actual value (not aligned) - this is the ACTUAL needed end
+ * - Front region covers from aligned base
+ * - Back region can start from anywhere (can overlap with front)
+ * - Two regions overlap to precisely cover [app_base, app_end)
+ * - Sub-regions disabled for areas outside app actual range
+ */
+static void dtm_mpu_config_precise_region(uint32_t app_base, uint32_t app_size,
+                                           uint32_t *f_sub_mask, uint32_t *b_sub_mask,
+                                           uint32_t *f_base, uint32_t *b_base,
+                                           uint32_t *region_size)
+{
+    uint32_t subregion_size;
+    uint32_t f_sub = 0, b_sub = 0;
+    uint32_t app_end = app_base + app_size;  /* Actual end, NOT aligned */
+    int i;
+
+    /* Use fixed 32KB region size (4KB sub-regions) for good granularity
+     * This gives us 4KB alignment requirement for app_base
+     */
+    *region_size = 32768;  /* 32KB */
+    subregion_size = 4096; /* 4KB sub-regions */
+
+    /* Front region: aligned to 32KB boundary, covers app start */
+    *f_base = app_base & ~(*region_size - 1);
+    
+    /* Calculate front sub-region mask
+     * Enable sub-regions that overlap with [app_base, app_end)
+     * Disable sub-regions completely outside this range */
+    for (i = 0; i < 8; i++) {
+        uint32_t subregion_start = *f_base + i * subregion_size;
+        uint32_t subregion_end = subregion_start + subregion_size;
+        
+        /* Enable only if sub-region overlaps with [app_base, app_end)
+         * Overlap condition: subregion_start < app_end AND subregion_end > app_base */
+        int overlaps = (subregion_start < app_end) && (subregion_end > app_base);
+        if (!overlaps) {
+            f_sub |= (1 << i);  /* Disable this sub-region */
+        }
+    }
+
+    /* Back region: can overlap with front region
+     * We place it to cover app_end precisely
+     * Strategy: align app_end down to 32KB boundary for back region base
+     * This allows overlap and ensures app_end is covered */
+    *b_base = app_end & ~(*region_size - 1);
+    
+    /* If b_base is the same as f_base, shift it to create overlap coverage */
+    if (*b_base == *f_base) {
+        /* App fits within one 32KB region, but we use two overlapping regions
+         * Back region starts at middle to extend coverage */
+        *b_base = *f_base + subregion_size * 4;  /* 16KB offset, creates overlap */
+    }
+    
+    /* Calculate back sub-region mask
+     * Enable sub-regions that overlap with [app_base, app_end)
+     * Disable sub-regions completely outside this range */
+    for (i = 0; i < 8; i++) {
+        uint32_t subregion_start = *b_base + i * subregion_size;
+        uint32_t subregion_end = subregion_start + subregion_size;
+        
+        /* Enable only if sub-region overlaps with [app_base, app_end) */
+        int overlaps = (subregion_start < app_end) && (subregion_end > app_base);
+        if (!overlaps) {
+            b_sub |= (1 << i);  /* Disable this sub-region */
+        }
+    }
+
+    *f_sub_mask = f_sub;
+    *b_sub_mask = b_sub;
+}
+
+int dtm_mpu_setup_app_protection(uint32_t app_ram_base, uint32_t app_ram_size) {
+    uint32_t f_sub_mask, b_sub_mask, region_size;
+    uint32_t f_base, b_base;
+    uint32_t f_size_encode, b_size_encode;
+    uint32_t f_rasr, b_rasr;
+
+    dtm_mpu_disable();
+
+    /* Region 0: Flash - Read/Execute for all */
+    dtm_mpu_region_set(0, DTM_MPU_KERNEL_FLASH_BASE, 1024 * 1024,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_EXEC);
+
+    /* Region 1: Kernel RAM (0x20000000-0x2000FFFF) - Privileged only, 64KB */
+    uint32_t rasr;
+    uint32_t size_encode = ARM_MPU_REGION_SIZE_64KB;
+    rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_PRIV, 0UL, 1UL, 1UL, 1UL, 0UL, size_encode);
+    ARM_MPU_SetRegionEx(1, DTM_ARM_MPU_RBAR(1, DTM_MPU_KERNEL_RAM_BASE), rasr);
+
+    /* Calculate precise MPU configuration using two regions */
+    dtm_mpu_config_precise_region(app_ram_base, app_ram_size,
+                                   &f_sub_mask, &b_sub_mask, &f_base, &b_base, &region_size);
+
+    /* Calculate size encodes */
+    f_size_encode = dtm_ffs(region_size) - 1;
+    b_size_encode = f_size_encode;
+
+    /* Region 2: Front part of app RAM with sub-region masking */
+    f_rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_FULL, 0UL, 1UL, 1UL, 1UL,
+                               f_sub_mask, f_size_encode);
+    ARM_MPU_SetRegionEx(2, DTM_ARM_MPU_RBAR(2, f_base), f_rasr);
+
+    /* Region 3: Back part of app RAM with sub-region masking
+     * Only enable if not all sub-regions are disabled */
+    if (b_sub_mask != 0xFF) {
+        b_rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_FULL, 0UL, 1UL, 1UL, 1UL,
+                                   b_sub_mask, b_size_encode);
+        ARM_MPU_SetRegionEx(3, DTM_ARM_MPU_RBAR(3, b_base), b_rasr);
+    } else {
+        /* All sub-regions disabled, clear this region */
+        ARM_MPU_ClrRegion(3);
+    }
+    
+    /* Region 4: Shared RAM - Full access (must be after app regions) */
+    dtm_mpu_region_set(4, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
+
+    /* Clear regions 5-7 (not used) */
+    ARM_MPU_ClrRegion(5);
+    ARM_MPU_ClrRegion(6);
+    ARM_MPU_ClrRegion(7);
+
+    dtm_mpu_enable();
+
+    return 0;
+}
+
+int dtm_mpu_isolate_app_region(uint32_t app_ram_base, uint32_t app_ram_size) {
+    return dtm_mpu_setup_app_protection(app_ram_base, app_ram_size);
+}
+
+int dtm_mpu_setup_app_isolation(uint32_t current_app_base, uint32_t current_app_size,
+                                 dtm_mpu_app_region_t *other_apps, int other_app_count) {
+    return dtm_mpu_setup_app_protection(current_app_base, current_app_size);
+}
+
+void dtm_mpu_get_isolation_regions(uint32_t current_app_base, uint32_t current_app_end,
+                                    dtm_mpu_app_region_t *regions, int *count) {
+    *count = 0;
+}

@@ -99,8 +99,8 @@ void *puppy_main_thread(void *arg) {
     while (1) {
         app_reap_exited();
         pup_reap_zombies();
-        pthread_delay(1000);
+        pthread_delay(100);
     }
 
-	return 0;
+    return 0;
 }

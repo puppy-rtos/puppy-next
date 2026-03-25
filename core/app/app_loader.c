@@ -10,7 +10,6 @@
 #define ALIGN_UP(size, align)   (((size) + (align) - 1) & ~((align) - 1))
 #endif
 
-user_app_t loaded_app;
 static volatile int user_app_exit_code = 0;
 static volatile int user_app_should_exit = 0;
 
@@ -493,44 +492,6 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     return 0;
 }
 
-int app_load_from_flash(void* flash_addr, pup_size_t size) {
-    static void* legacy_app_ram = NULL;
-    unsigned int required_size;
-
-    if (app_calc_memory_requirement(flash_addr, size, &required_size) != 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to calculate legacy app RAM requirement");
-        return -1;
-    }
-
-    if (required_size > kheap_user_total_size()) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Legacy app RAM requirement too large: %u (pool=%u)",
-                      required_size, (unsigned int)kheap_user_total_size());
-        return -1;
-    }
-
-    if (required_size > kheap_user_free_size()) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Legacy app RAM not enough: need=%u free=%u",
-                      required_size, (unsigned int)kheap_user_free_size());
-        return -1;
-    }
-
-    if (legacy_app_ram) {
-        kheap_user_free(legacy_app_ram);
-        legacy_app_ram = NULL;
-    }
-
-    legacy_app_ram = kheap_user_memalign(8, required_size);
-    if (!legacy_app_ram) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to allocate legacy app RAM: %u", required_size);
-        return -1;
-    }
-
-    loaded_app.pid = 0;
-    return app_load_into_memory(flash_addr, size,
-                                (unsigned int)legacy_app_ram, required_size,
-                                &loaded_app);
-}
-
 static void* user_app_thread(void* arg) {
     user_app_t* app = (user_app_t*)arg;
     
@@ -587,10 +548,6 @@ static void* user_app_thread(void* arg) {
     return NULL;
 }
 
-static void __app_run_internal(user_app_t* app) {
-    app_run(app, "user_app", NULL);
-}
-
 int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out) {
     pthread_t thread;
     pthread_attr_t attr;
@@ -620,10 +577,6 @@ int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out) {
     }
     
     return 0;
-}
-
-void app_run_legacy(user_app_t* app) {
-    __app_run_internal(app);
 }
 
 int app_check_exit(void) {

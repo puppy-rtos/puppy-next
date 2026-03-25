@@ -50,15 +50,11 @@ typedef struct {
 #define APP_HEADER_MAGIC 0x50555050
 
 int app_loader_init(void);
-int app_load_from_flash(void* flash_addr, pup_size_t size);
 int app_calc_memory_requirement(void* flash_addr, pup_size_t size, unsigned int* required_size);
 int app_load_into_memory(void* flash_addr, pup_size_t size,
                          unsigned int ram_base, unsigned int ram_size,
                          user_app_t* app);
-void app_run_legacy(user_app_t* app);
 int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out);
-
-extern user_app_t loaded_app;
 
 void kernel_reloc(unsigned int *gbase, unsigned int tbase, 
                   unsigned int gs, unsigned int ge, unsigned int ts,

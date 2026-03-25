@@ -366,11 +366,7 @@ void app_list(void) {
     }
 }
 
-int app_exec(const char* name, const char* path, int wait) {
-    return app_exec_internal(name, path, NULL, wait);
-}
-
-int app_exec_with_arg(const char* name, const char* path, const char* arg, int wait) {
+int app_exec(const char* name, const char* path, const char* arg, int wait) {
     return app_exec_internal(name, path, arg, wait);
 }
 

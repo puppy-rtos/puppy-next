@@ -354,12 +354,9 @@ static long sys_execve(long arg1, long arg2, long arg3, long arg4) {
     
     const char* app_name = name ? name : path;
 
-    int result;
-    if (app_arg && app_arg[0] != '\0') {
-        result = app_exec_with_arg(app_name, path, app_arg, wait);
-    } else {
-        result = app_exec(app_name, path, wait);
-    }
+    int result = app_exec(app_name, path,
+                          (app_arg && app_arg[0] != '\0') ? app_arg : NULL,
+                          wait);
     if (result < 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_execve: failed to exec app");
         return -1;

@@ -4,7 +4,10 @@
 #include "puppy_log.h"
 #include "mpu.h"
 #include "pup_romfs.h"
+#include "pup_devfs.h"
 #include "kheap.h"
+#include "syscall.h"
+#include "pup_channel.h"
 #include <puppy_core.h>
 #include <string.h>
 #include <stdio.h>
@@ -207,6 +210,10 @@ void app_free_memory(int pid) {
     if (app->memory_base != 0) {
         kheap_user_free((void*)app->memory_base);
     }
+
+    syscall_cleanup_owner_resources(app->pid);
+    pup_devfs_cleanup_owner_devices(app->pid);
+    pup_channel_cleanup_owner(app->pid);
 
     if (prev) {
         prev->next = app->next;

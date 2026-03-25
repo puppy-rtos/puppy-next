@@ -56,6 +56,11 @@
 
 #define DTM_MPU_SUB_REGION_CNT 8
 
+#define DTM_GPIO_MMIO_BASE 0x40020000UL
+#define DTM_GPIO_MMIO_SIZE (8U * 1024U)
+#define DTM_EXTI_MMIO_BASE 0x40013C00UL
+#define DTM_EXTI_MMIO_SIZE (1U * 1024U)
+
 #define DTM_ARM_MPU_RBAR(region, base) \
     (((base) & DTM_MPU_RBAR_ADDR_Msk) | \
      ((region) & DTM_MPU_RBAR_REGION_Msk) | \
@@ -372,8 +377,12 @@ static int dtm_mpu_apply_profile_internal(uint32_t region_size,
     dtm_mpu_region_set(4, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
 
-    ARM_MPU_ClrRegion(5);
-    ARM_MPU_ClrRegion(6);
+    /* Allow user-mode GPIO driver to access GPIOA..GPIOI registers only. */
+    dtm_mpu_region_set(5, DTM_GPIO_MMIO_BASE, DTM_GPIO_MMIO_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE);
+    /* Allow user-mode test app to trigger EXTI software interrupt (SWIER). */
+    dtm_mpu_region_set(6, DTM_EXTI_MMIO_BASE, DTM_EXTI_MMIO_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE);
     ARM_MPU_ClrRegion(7);
 
     dtm_mpu_enable();

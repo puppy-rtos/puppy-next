@@ -164,6 +164,16 @@ def run_default_sequence(runner: QemuCmdRunner) -> int:
             ],
             "timeout": 10.0,
         },
+        {
+            "name": "driver chain",
+            "command": "/rom/test driver",
+            "expects": [
+                "[driver] chain test completed",
+                "Test driver PASSED",
+                PROMPT,
+            ],
+            "timeout": 10.0,
+        },
     ]
 
     for step in steps:

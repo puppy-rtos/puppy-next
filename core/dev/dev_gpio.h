@@ -17,6 +17,6 @@ typedef struct {
 #define GPIO_DIR_IN             0
 #define GPIO_DIR_OUT            1
 
-int dev_gpio_init(void);
+int dev_gpio_irq_bridge_init(void);
 
 #endif

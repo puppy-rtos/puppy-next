@@ -4,7 +4,10 @@
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
 #include "shared/pup_app_memory.h"
+#include "shared/pup_driver_abi.h"
 #include "shared/pup_user_thread.h"
+#include "shared/pup_channel_abi.h"
+#include "shared/pup_devfs_proto.h"
 
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
@@ -38,6 +41,20 @@
 #define SYS_SHARED_FREE      24
 #define SYS_SHARED_MEMALIGN  25
 #define SYS_APP_RAM_RANGE    26
+#define SYS_DEVFS_REGISTER   27
+#define SYS_DEVFS_UNREGISTER 28
+#define SYS_IRQ_SUBSCRIBE    29
+#define SYS_IRQ_UNSUBSCRIBE  30
+#define SYS_IRQ_WAIT         31
+
+#define SYS_CHANNEL_CREATE   32
+#define SYS_CHANNEL_DESTROY  33
+#define SYS_MSG_SEND         34
+#define SYS_MSG_RECEIVE      35
+#define SYS_MSG_REPLY        36
+
+/* STM32F407 NVIC external IRQ numbers used by user-mode drivers */
+#define PUP_IRQ_EXTI9_5      23
 
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
@@ -150,7 +167,7 @@ static inline int sem_post(int handle) {
     return (int)syscall(SYS_SEM_POST, (long)handle, 0, 0, 0);
 }
 
-static inline void* shared_malloc(size_t size) {
+static inline void* shared_malloc(unsigned int size) {
     return (void*)syscall(SYS_SHARED_MALLOC, size, 0, 0, 0);
 }
 
@@ -158,12 +175,66 @@ static inline void shared_free(void* ptr) {
     syscall(SYS_SHARED_FREE, (long)ptr, 0, 0, 0);
 }
 
-static inline void* shared_memalign(size_t align, size_t size) {
+static inline void* shared_memalign(unsigned int align, unsigned int size) {
     return (void*)syscall(SYS_SHARED_MEMALIGN, align, size, 0, 0);
 }
 
 static inline int app_get_ram_range(pup_app_ram_range_t* range) {
     return (int)syscall(SYS_APP_RAM_RANGE, (long)range, 0, 0, 0);
+}
+
+static inline int devfs_register(const pup_user_devfs_registration_t* registration) {
+    return (int)syscall(SYS_DEVFS_REGISTER, (long)registration, 0, 0, 0);
+}
+
+static inline int devfs_unregister(const char* name) {
+    return (int)syscall(SYS_DEVFS_UNREGISTER, (long)name, 0, 0, 0);
+}
+
+static inline int irq_subscribe(const pup_user_irq_subscription_t* subscription) {
+    return (int)syscall(SYS_IRQ_SUBSCRIBE, (long)subscription, 0, 0, 0);
+}
+
+static inline int irq_unsubscribe(int handle) {
+    return (int)syscall(SYS_IRQ_UNSUBSCRIBE, handle, 0, 0, 0);
+}
+
+static inline int irq_wait(int handle, int timeout_ticks) {
+    return (int)syscall(SYS_IRQ_WAIT, handle, timeout_ticks, 0, 0);
+}
+
+/* ---------- Channel + Pulse IPC ---------------------------------------- */
+
+static inline int channel_create(void) {
+    return (int)syscall(SYS_CHANNEL_CREATE, 0, 0, 0, 0);
+}
+
+static inline int channel_destroy(int channel_id) {
+    return (int)syscall(SYS_CHANNEL_DESTROY, channel_id, 0, 0, 0);
+}
+
+/*
+ * msg_send: enqueue a request and block until the server replies.
+ * buf must reside in shared memory (allocated via shared_malloc).
+ */
+static inline long msg_send(int channel_id, void *buf, int buf_sz) {
+    return syscall(SYS_MSG_SEND, channel_id, (long)buf, buf_sz, 0);
+}
+
+/*
+ * msg_receive: block until a message arrives on channel_id.
+ * Fills *msg; returns the cookie (0=pulse, >0=request).
+ */
+static inline int msg_receive(int channel_id, pup_channel_msg_t *msg) {
+    return (int)syscall(SYS_MSG_RECEIVE, channel_id, (long)msg, 0, 0);
+}
+
+/*
+ * msg_reply: complete a REQUEST identified by cookie.
+ * result is returned to the blocked msg_send() caller.
+ */
+static inline int msg_reply(int channel_id, int cookie, long result) {
+    return (int)syscall(SYS_MSG_REPLY, channel_id, cookie, result, 0);
 }
 
 #endif

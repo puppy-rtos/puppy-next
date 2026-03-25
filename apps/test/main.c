@@ -1020,6 +1020,83 @@ static int test_shared_heap(void)
     return 0;
 }
 
+static int test_driver_chain(void)
+{
+    int fd_gpio = -1;
+    int fd_led = -1;
+    int fd_key = -1;
+    int dir = 0;
+    int val = 0;
+    char key_val = 0;
+    volatile unsigned int *exti_swier = (volatile unsigned int *)0x40013C10U;
+
+    printf("\n=== User-Mode GPIO Driver Chain Test ===\n");
+
+    fd_gpio = open("/dev/gpio0", O_RDWR);
+    fd_led = open("/dev/led0", O_RDWR);
+    fd_key = open("/dev/key0", O_RDONLY);
+
+    if (fd_gpio < 0 || fd_led < 0 || fd_key < 0) {
+        printf("[driver] open failed: gpio=%d led=%d key=%d\n", fd_gpio, fd_led, fd_key);
+        if (fd_gpio >= 0) close(fd_gpio);
+        if (fd_led >= 0) close(fd_led);
+        if (fd_key >= 0) close(fd_key);
+        return -1;
+    }
+
+    dir = 1;
+    if (ioctl(fd_gpio, 0x2001, &dir) < 0) {
+        printf("[driver] gpio set dir failed\n");
+        goto fail;
+    }
+
+    dir = -1;
+    if (ioctl(fd_gpio, 0x2002, &dir) < 0) {
+        printf("[driver] gpio get dir failed\n");
+        goto fail;
+    }
+    printf("[driver] gpio dir=%d\n", dir);
+
+    val = 1;
+    if (ioctl(fd_led, 0x2003, &val) < 0) {
+        printf("[driver] led set value=1 failed\n");
+        goto fail;
+    }
+    delay(100);
+
+    val = 0;
+    if (ioctl(fd_led, 0x2003, &val) < 0) {
+        printf("[driver] led set value=0 failed\n");
+        goto fail;
+    }
+
+    if (read(fd_key, &key_val, 1) <= 0) {
+        printf("[driver] key read failed\n");
+        goto fail;
+    }
+
+    printf("[driver] key0 value=%d (%s)\n",
+           key_val ? 1 : 0,
+           key_val ? "released" : "pressed");
+
+        /* Trigger EXTI line5 by software to validate key0 IRQ bridge path. */
+        *exti_swier |= (1U << 5);
+        delay(20);
+        printf("[driver] key0 SW interrupt triggered (EXTI line5)\n");
+
+    close(fd_gpio);
+    close(fd_led);
+    close(fd_key);
+    printf("[driver] chain test completed\n");
+    return 0;
+
+fail:
+    close(fd_gpio);
+    close(fd_led);
+    close(fd_key);
+    return -1;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -1032,6 +1109,7 @@ static const test_cmd_t test_cmds[] = {
     {"sem", "Test named semaphore wait/post/close", test_sem},
     {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},
     {"shm", "Test shared heap memory allocation and free", test_shared_heap},
+    {"driver", "Test user-mode gpio driver open/ioctl/read chain", test_driver_chain},
 };
 
 #define TEST_CMD_NUM (sizeof(test_cmds) / sizeof(test_cmds[0]))

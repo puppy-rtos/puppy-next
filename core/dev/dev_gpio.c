@@ -1,146 +1,75 @@
 #include "dev_gpio.h"
 #include "puppy_log.h"
-#include "dtm_gpio.h"
-#include <libcm.h>
+#include "dtm_irq.h"
+#include "syscall.h"
+
+/* STM32F407 EXTI9_5 IRQ number in NVIC external IRQ space. */
+#define GPIO_KEY0_EXTI_IRQ_NUM 23U
+
+/* Key0 is PC5; EXTI line 5 routed through SYSCFG EXTICR2[7:4]. */
+#define GPIO_KEY0_EXTI_LINE_BIT   (1U << 5)
+#define RCC_BASE_ADDR             0x40023800UL
+#define SYSCFG_BASE_ADDR          0x40013800UL
+#define EXTI_BASE_ADDR            0x40013C00UL
+#define RCC_APB2ENR_OFFSET        0x44UL
+#define RCC_AHB1ENR_OFFSET        0x30UL
+#define RCC_APB2ENR_SYSCFGEN_BIT  (1U << 14)
+#define RCC_AHB1ENR_GPIOAEN_BIT   (1U << 0)
+#define RCC_AHB1ENR_GPIOCEN_BIT   (1U << 2)
+#define RCC_AHB1ENR_GPIOFEN_BIT   (1U << 5)
 
 typedef struct {
-    uint32_t gpiox;
-    uint16_t pinx;
-    uint8_t mode;
-    uint8_t value;
-    uint8_t pupd;
-} gpio_dev_data_t;
+    volatile uint32_t MEMRMP;
+    volatile uint32_t PMC;
+    volatile uint32_t EXTICR[4];
+} pup_syscfg_regs_t;
 
-#define GPIO_DEV_COUNT    3
+typedef struct {
+    volatile uint32_t IMR;
+    volatile uint32_t EMR;
+    volatile uint32_t RTSR;
+    volatile uint32_t FTSR;
+    volatile uint32_t SWIER;
+    volatile uint32_t PR;
+} pup_exti_regs_t;
 
-static gpio_dev_data_t gpio_devs[GPIO_DEV_COUNT] = {
-    {0x40020000, DTM_GPIO_PIN0, DTM_GPIO_MODE_OUT, 0, DTM_GPIO_PUPD_NONE},
-    {0x40021400, DTM_GPIO_PIN11, DTM_GPIO_MODE_OUT, 0, DTM_GPIO_PUPD_NONE}, // PF11, onboard LED
-    {0x40020800, DTM_GPIO_PIN5, DTM_GPIO_MODE_IN, 0, DTM_GPIO_PUPD_PU}, // PC5, key0
-};
-
-static int gpio_open(pup_devfs_file_t *file)
+int dev_gpio_irq_bridge_init(void)
 {
-    gpio_dev_data_t *data = (gpio_dev_data_t *)file->private_data;
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_open: gpiox=0x%x, pin=%d", 
-                  data->gpiox, data->pinx);
-    
-    dtm_gpio_set(data->gpiox, data->pinx, data->mode, 
-                 DTM_GPIO_OTYPE_PP, DTM_GPIO_SPEED_LOW, data->pupd);
-    
+    volatile uint32_t *apb2enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_APB2ENR_OFFSET);
+    volatile uint32_t *ahb1enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_AHB1ENR_OFFSET);
+    pup_syscfg_regs_t *syscfg = (pup_syscfg_regs_t *)SYSCFG_BASE_ADDR;
+    pup_exti_regs_t *exti = (pup_exti_regs_t *)EXTI_BASE_ADDR;
+
+    /* Enable SYSCFG clock so EXTICR mapping is writable. */
+    *apb2enr |= RCC_APB2ENR_SYSCFGEN_BIT;
+    *ahb1enr |= (RCC_AHB1ENR_GPIOAEN_BIT | RCC_AHB1ENR_GPIOCEN_BIT | RCC_AHB1ENR_GPIOFEN_BIT);
+
+    /* Route EXTI line 5 to port C (0x2). EXTICR2 bits [7:4]. */
+    syscfg->EXTICR[1] &= ~(0xFU << 4);
+    syscfg->EXTICR[1] |= (0x2U << 4);
+
+    /* Unmask line 5 and trigger on both edges to catch press/release. */
+    exti->IMR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->RTSR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->FTSR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->PR = GPIO_KEY0_EXTI_LINE_BIT;
+
+    dtm_nvic_enable_irq((DTM_IRQn_Type)(DTM_ChipSpecific_IRQn + GPIO_KEY0_EXTI_IRQ_NUM));
+    dtm_nvic_set_priority((DTM_IRQn_Type)(DTM_ChipSpecific_IRQn + GPIO_KEY0_EXTI_IRQ_NUM), 2);
+
+    PUP_LOG_INFO(PUP_LOG_MODULE_DEV,
+                 "GPIO IRQ bridge ready: EXTI line5 -> irq=%u",
+                 (unsigned int)GPIO_KEY0_EXTI_IRQ_NUM);
     return PUP_DEVFS_OK;
 }
 
-static int gpio_close(pup_devfs_file_t *file)
+void EXTI9_5_IRQHandler(void)
 {
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_close");
-    return PUP_DEVFS_OK;
-}
+    pup_exti_regs_t *exti = (pup_exti_regs_t *)EXTI_BASE_ADDR;
 
-static int gpio_read(pup_devfs_file_t *file, char *buf, int len)
-{
-    gpio_dev_data_t *data = (gpio_dev_data_t *)file->private_data;
-    
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_read: gpiox=0x%x, pin=%d", 
-                  data->gpiox, data->pinx);
-    
-    if (len > 0) {
-        buf[0] = dtm_gpio_pin_get(data->gpiox, data->pinx);
-        return 1;
+    if (exti->PR & GPIO_KEY0_EXTI_LINE_BIT) {
+        /* Clear pending first, then notify user-space IRQ subscribers. */
+        exti->PR = GPIO_KEY0_EXTI_LINE_BIT;
+        syscall_irq_notify(GPIO_KEY0_EXTI_IRQ_NUM);
     }
-    
-    return 0;
-}
-
-static int gpio_write(pup_devfs_file_t *file, const char *buf, int len)
-{
-    gpio_dev_data_t *data = (gpio_dev_data_t *)file->private_data;
-    int value;
-    unsigned char ch;
-
-    if (len <= 0) {
-        return 0;
-    }
-
-    ch = (unsigned char)buf[0];
-    if (ch == '\n' || ch == '\r') {
-        return 0;
-    }
-
-    if (ch == '0') {
-        value = 0;
-    } else if (ch == '1') {
-        value = 1;
-    } else {
-        value = ch ? 1 : 0;
-    }
-    
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "gpio_write: gpiox=0x%x, pin=%d, raw=%d, value=%d", 
-                  data->gpiox, data->pinx, ch, value);
-
-    dtm_gpio_pin_set(data->gpiox, data->pinx, value);
-    data->value = (uint8_t)value;
-    return 1;
-    
-}
-
-static int gpio_ioctl(pup_devfs_file_t *file, int cmd, void *arg)
-{
-    gpio_dev_data_t *data = (gpio_dev_data_t *)file->private_data;
-    
-    switch (cmd) {
-    case GPIO_IOCTL_SET_DIR:
-        data->mode = *(int *)arg == GPIO_DIR_IN ? DTM_GPIO_MODE_IN : DTM_GPIO_MODE_OUT;
-        dtm_gpio_set(data->gpiox, data->pinx, data->mode, 
-                     DTM_GPIO_OTYPE_PP, DTM_GPIO_SPEED_LOW, data->pupd);
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_DEV, "GPIO direction set to %s", 
-                      data->mode == DTM_GPIO_MODE_IN ? "INPUT" : "OUTPUT");
-        return PUP_DEVFS_OK;
-        
-    case GPIO_IOCTL_GET_DIR:
-        *(int *)arg = (data->mode == DTM_GPIO_MODE_IN) ? GPIO_DIR_IN : GPIO_DIR_OUT;
-        return PUP_DEVFS_OK;
-        
-    case GPIO_IOCTL_SET_VALUE:
-        dtm_gpio_pin_set(data->gpiox, data->pinx, *(int *)arg ? 1 : 0);
-        data->value = *(int *)arg ? 1 : 0;
-        return PUP_DEVFS_OK;
-        
-    case GPIO_IOCTL_GET_VALUE:
-        *(int *)arg = dtm_gpio_pin_get(data->gpiox, data->pinx);
-        return PUP_DEVFS_OK;
-        
-    default:
-        PUP_LOG_ERROR(PUP_LOG_MODULE_DEV, "Unknown GPIO ioctl: 0x%x", cmd);
-        return PUP_DEVFS_EINVAL;
-    }
-}
-
-static const pup_devfs_file_ops_t gpio_ops = {
-    .open = gpio_open,
-    .close = gpio_close,
-    .read = gpio_read,
-    .write = gpio_write,
-    .ioctl = gpio_ioctl
-};
-
-static const pup_devfs_device_t gpio_devices[GPIO_DEV_COUNT] = {
-    {"gpio0", &gpio_ops, &gpio_devs[0]},
-    {"led0", &gpio_ops, &gpio_devs[1]},
-    {"key0", &gpio_ops, &gpio_devs[2]},
-};
-
-int dev_gpio_init(void)
-{
-    PUP_LOG_INFO(PUP_LOG_MODULE_DEV, "Registering GPIO devices");
-    
-    for (int i = 0; i < GPIO_DEV_COUNT; i++) {
-        int ret = pup_devfs_register_device(&gpio_devices[i]);
-        if (ret != PUP_DEVFS_OK) {
-            PUP_LOG_ERROR(PUP_LOG_MODULE_DEV, "Failed to register gpio%d", i);
-            return ret;
-        }
-    }
-    
-    return PUP_DEVFS_OK;
 }

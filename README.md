@@ -125,7 +125,8 @@ xmake build firmware
 
 1. docs/shell-stdio-architecture.md
 2. docs/pup-fs-architecture.md
-3. docs/repo-reorg-checklist.md
+3. docs/user-mode-driver-architecture.md
+4. docs/repo-reorg-checklist.md
 
 ## 8. 常见问题
 

@@ -3,10 +3,18 @@
 #include "puppy_log.h"
 #include "kheap.h"
 #include <libcm.h>
+#include "pup_channel.h"
 
 #define PUP_DEVFS_MAX_DEVICES 16
 
+typedef struct {
+    int used;
+    char name[PUP_DEVFS_MAX_NAME_LEN + 1];
+    pup_devfs_device_t device;
+} pup_devfs_dynamic_device_t;
+
 static const pup_devfs_device_t *g_pup_devfs_device_table[PUP_DEVFS_MAX_DEVICES];
+static pup_devfs_dynamic_device_t g_pup_devfs_dynamic_devices[PUP_DEVFS_MAX_DEVICES];
 static int g_pup_devfs_device_count = 0;
 static int g_pup_devfs_registry_initialized = 0;
 
@@ -23,9 +31,36 @@ int pup_devfs_registry_init(void)
     }
 
     libcm_memset(g_pup_devfs_device_table, 0, sizeof(g_pup_devfs_device_table));
+    libcm_memset(g_pup_devfs_dynamic_devices, 0, sizeof(g_pup_devfs_dynamic_devices));
     g_pup_devfs_device_count = 0;
     g_pup_devfs_registry_initialized = 1;
     return PUP_DEVFS_OK;
+}
+
+static pup_devfs_dynamic_device_t* pup_devfs_find_free_dynamic_slot(void)
+{
+    int i;
+
+    for (i = 0; i < PUP_DEVFS_MAX_DEVICES; i++) {
+        if (!g_pup_devfs_dynamic_devices[i].used) {
+            return &g_pup_devfs_dynamic_devices[i];
+        }
+    }
+
+    return PUP_NULL;
+}
+
+static void pup_devfs_release_dynamic_device(const pup_devfs_device_t *device)
+{
+    int i;
+
+    for (i = 0; i < PUP_DEVFS_MAX_DEVICES; i++) {
+        if (g_pup_devfs_dynamic_devices[i].used &&
+            &g_pup_devfs_dynamic_devices[i].device == device) {
+            libcm_memset(&g_pup_devfs_dynamic_devices[i], 0, sizeof(g_pup_devfs_dynamic_devices[i]));
+            return;
+        }
+    }
 }
 
 int pup_devfs_register_device(const pup_devfs_device_t *device)
@@ -58,6 +93,7 @@ int pup_devfs_unregister_device(const char *name)
 {
     int i;
     int j;
+    const pup_devfs_device_t *device;
 
     if (!name) {
         return PUP_DEVFS_EINVAL;
@@ -65,15 +101,140 @@ int pup_devfs_unregister_device(const char *name)
 
     for (i = 0; i < g_pup_devfs_device_count; i++) {
         if (libcm_strcmp(g_pup_devfs_device_table[i]->name, name) == 0) {
+            device = g_pup_devfs_device_table[i];
             for (j = i; j < g_pup_devfs_device_count - 1; j++) {
                 g_pup_devfs_device_table[j] = g_pup_devfs_device_table[j + 1];
             }
             g_pup_devfs_device_count--;
+            g_pup_devfs_device_table[g_pup_devfs_device_count] = PUP_NULL;
+
+            if (device->source_type == PUP_DEVFS_DEVICE_SOURCE_USER) {
+                pup_devfs_release_dynamic_device(device);
+            }
+
             return PUP_DEVFS_OK;
         }
     }
 
     return PUP_DEVFS_ENOENT;
+}
+
+int pup_devfs_register_user_device(const pup_user_devfs_registration_t *registration, int owner_pid)
+{
+    pup_devfs_dynamic_device_t *slot;
+    int i;
+
+    if (!registration || !registration->name || owner_pid <= 0) {
+        return PUP_DEVFS_EINVAL;
+    }
+
+    if (!g_pup_devfs_registry_initialized) {
+        return PUP_DEVFS_ERROR;
+    }
+
+    if (g_pup_devfs_device_count >= PUP_DEVFS_MAX_DEVICES) {
+        return PUP_DEVFS_ENOMEM;
+    }
+
+    if (libcm_strlen(registration->name) == 0 ||
+        libcm_strlen(registration->name) > PUP_DEVFS_MAX_NAME_LEN) {
+        return PUP_DEVFS_EINVAL;
+    }
+
+    if (pup_devfs_find_device(registration->name) != PUP_NULL) {
+        return PUP_DEVFS_EINVAL;
+    }
+
+    if (registration->device_id < 0) {
+        return PUP_DEVFS_EINVAL;
+    }
+
+    for (i = 0; i < g_pup_devfs_device_count; i++) {
+        const pup_devfs_device_t *dev = g_pup_devfs_device_table[i];
+        if (dev && dev->source_type == PUP_DEVFS_DEVICE_SOURCE_USER
+            && dev->owner_pid == owner_pid
+            && dev->device_id == registration->device_id) {
+            return PUP_DEVFS_EINVAL;
+        }
+    }
+
+    slot = pup_devfs_find_free_dynamic_slot();
+    if (!slot) {
+        return PUP_DEVFS_ENOMEM;
+    }
+
+    libcm_memset(slot, 0, sizeof(*slot));
+    slot->used = 1;
+    libcm_strncpy(slot->name, registration->name, PUP_DEVFS_MAX_NAME_LEN);
+    slot->name[PUP_DEVFS_MAX_NAME_LEN] = '\0';
+
+    slot->device.name = slot->name;
+    slot->device.ops = PUP_NULL;
+    slot->device.private_data = PUP_NULL;
+    slot->device.owner_pid = owner_pid;
+    slot->device.channel_id = registration->channel_id;
+    slot->device.device_id = registration->device_id;
+    slot->device.source_type = PUP_DEVFS_DEVICE_SOURCE_USER;
+    slot->device.flags = registration->flags | PUP_DRIVER_DEVICE_FLAG_DYNAMIC | PUP_DRIVER_DEVICE_FLAG_ONLINE;
+    slot->device.capabilities = registration->capabilities;
+
+    g_pup_devfs_device_table[g_pup_devfs_device_count++] = &slot->device;
+
+    PUP_LOG_INFO(PUP_LOG_MODULE_CORE,
+                 "pup_devfs: registered user device /dev/%s (owner pid=%d)",
+                 slot->device.name,
+                 owner_pid);
+    return PUP_DEVFS_OK;
+}
+
+int pup_devfs_unregister_user_device(const char *name, int owner_pid)
+{
+    const pup_devfs_device_t *device = pup_devfs_find_device(name);
+
+    if (!device || device->source_type != PUP_DEVFS_DEVICE_SOURCE_USER) {
+        return PUP_DEVFS_ENOENT;
+    }
+
+    if (device->owner_pid != owner_pid) {
+        return PUP_DEVFS_EINVAL;
+    }
+
+    return pup_devfs_unregister_device(device->name);
+}
+
+int pup_devfs_cleanup_owner_devices(int owner_pid)
+{
+    int removed = 0;
+    int i = 0;
+
+    if (owner_pid <= 0) {
+        return 0;
+    }
+
+    while (i < g_pup_devfs_device_count) {
+        const pup_devfs_device_t *device = g_pup_devfs_device_table[i];
+
+        if (device && device->source_type == PUP_DEVFS_DEVICE_SOURCE_USER && device->owner_pid == owner_pid) {
+            char dev_name[PUP_DEVFS_MAX_NAME_LEN + 1];
+
+            libcm_strncpy(dev_name, device->name, PUP_DEVFS_MAX_NAME_LEN);
+            dev_name[PUP_DEVFS_MAX_NAME_LEN] = '\0';
+            pup_devfs_unregister_device(dev_name);
+            removed++;
+            continue;
+        }
+
+        i++;
+    }
+
+    if (removed > 0) {
+        PUP_LOG_INFO(PUP_LOG_MODULE_CORE,
+                     "pup_devfs: cleaned %d user device(s) for owner pid=%d",
+                     removed,
+                     owner_pid);
+    }
+
+    return removed;
 }
 
 const pup_devfs_device_t *pup_devfs_find_device(const char *name)
@@ -121,7 +282,9 @@ void pup_devfs_list_devices(void)
     PUP_PRINTK("  ------  ------\n");
 
     for (i = 0; i < g_pup_devfs_device_count; i++) {
-        PUP_PRINTK("  device  /dev/%s\n", g_pup_devfs_device_table[i]->name);
+        const pup_devfs_device_t *device = g_pup_devfs_device_table[i];
+        const char *type = (device->source_type == PUP_DEVFS_DEVICE_SOURCE_USER) ? "user" : "device";
+        PUP_PRINTK("  %-6s /dev/%s\n", type, device->name);
     }
 
     PUP_PRINTK("Total: %d device(s)\n", g_pup_devfs_device_count);
@@ -131,6 +294,186 @@ static int pup_devfs_mount(struct pup_filesystem *fs, unsigned long rwflag, cons
 {
     return 0;
 }
+
+/* -----------------------------------------------------------------------
+ * Channel-based proxy ops – used for user-mode registered devices.
+ * The kernel DevFS side allocates a pup_devfs_proxy_payload_t in shared
+ * memory, sends it via pup_channel_send(), and waits for the driver to
+ * call msg_reply() with the result.
+ * --------------------------------------------------------------------- */
+
+static int proxy_open(pup_devfs_file_t *file)
+{
+    int ch = file->device->channel_id;
+    pup_devfs_proxy_payload_t *payload;
+    long result;
+
+    payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
+    if (!payload) {
+        return -5;
+    }
+    payload->op       = DEVFS_PROXY_OP_OPEN;
+    payload->device_id = file->device->device_id;
+    payload->flags    = file->flags;
+    payload->cmd      = 0;
+    payload->data_buf = PUP_NULL;
+    payload->data_len = 0;
+
+    result = pup_channel_send(ch, payload, sizeof(*payload));
+    kheap_shared_free(payload);
+    return (int)result;
+}
+
+static int proxy_close(pup_devfs_file_t *file)
+{
+    int ch = file->device->channel_id;
+    pup_devfs_proxy_payload_t *payload;
+
+    if (!pup_channel_is_valid(ch)) {
+        return 0;
+    }
+    payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
+    if (!payload) {
+        return 0;
+    }
+    payload->op       = DEVFS_PROXY_OP_CLOSE;
+    payload->device_id = file->device->device_id;
+    payload->flags    = 0;
+    payload->cmd      = 0;
+    payload->data_buf = PUP_NULL;
+    payload->data_len = 0;
+
+    pup_channel_send(ch, payload, sizeof(*payload));
+    kheap_shared_free(payload);
+    return 0;
+}
+
+static int proxy_read(pup_devfs_file_t *file, char *buf, int len)
+{
+    int ch = file->device->channel_id;
+    pup_devfs_proxy_payload_t *payload;
+    void *data_buf = PUP_NULL;
+    long result;
+
+    if (len <= 0) {
+        return 0;
+    }
+    payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
+    if (!payload) {
+        return -5;
+    }
+    data_buf = kheap_shared_malloc((pup_size_t)len);
+    if (!data_buf) {
+        kheap_shared_free(payload);
+        return -5;
+    }
+
+    payload->op       = DEVFS_PROXY_OP_READ;
+    payload->device_id = file->device->device_id;
+    payload->flags    = 0;
+    payload->cmd      = 0;
+    payload->data_buf = data_buf;
+    payload->data_len = len;
+
+    result = pup_channel_send(ch, payload, sizeof(*payload));
+
+    if (result > 0 && buf) {
+        libcm_memcpy(buf, data_buf, (int)result);
+    }
+
+    kheap_shared_free(data_buf);
+    kheap_shared_free(payload);
+    return (int)result;
+}
+
+static int proxy_write(pup_devfs_file_t *file, const char *buf, int len)
+{
+    int ch = file->device->channel_id;
+    pup_devfs_proxy_payload_t *payload;
+    void *data_buf = PUP_NULL;
+    long result;
+
+    if (len <= 0) {
+        return 0;
+    }
+    payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
+    if (!payload) {
+        return -5;
+    }
+    data_buf = kheap_shared_malloc((pup_size_t)len);
+    if (!data_buf) {
+        kheap_shared_free(payload);
+        return -5;
+    }
+    if (buf) {
+        libcm_memcpy(data_buf, buf, len);
+    }
+
+    payload->op       = DEVFS_PROXY_OP_WRITE;
+    payload->device_id = file->device->device_id;
+    payload->flags    = 0;
+    payload->cmd      = 0;
+    payload->data_buf = data_buf;
+    payload->data_len = len;
+
+    result = pup_channel_send(ch, payload, sizeof(*payload));
+
+    kheap_shared_free(data_buf);
+    kheap_shared_free(payload);
+    return (int)result;
+}
+
+static int proxy_ioctl(pup_devfs_file_t *file, int cmd, void *arg)
+{
+    int ch = file->device->channel_id;
+    pup_devfs_proxy_payload_t *payload;
+    void *data_buf = PUP_NULL;
+    long result;
+
+    payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
+    if (!payload) {
+        return -5;
+    }
+
+    /* Copy the ioctl argument (assumed to be ≤ 4 bytes, e.g. GPIO value) to
+     * shared memory so the user-mode driver can access it safely. */
+    if (arg) {
+        data_buf = kheap_shared_malloc(sizeof(unsigned int));
+        if (!data_buf) {
+            kheap_shared_free(payload);
+            return -5;
+        }
+        *(unsigned int *)data_buf = *(unsigned int *)arg;
+    }
+
+    payload->op       = DEVFS_PROXY_OP_IOCTL;
+    payload->device_id = file->device->device_id;
+    payload->flags    = 0;
+    payload->cmd      = cmd;
+    payload->data_buf = data_buf;
+    payload->data_len = arg ? (int)sizeof(unsigned int) : 0;
+
+    result = pup_channel_send(ch, payload, sizeof(*payload));
+
+    /* Copy result back for GET-style ioctls */
+    if (result >= 0 && data_buf && arg) {
+        *(unsigned int *)arg = *(unsigned int *)data_buf;
+    }
+
+    if (data_buf) {
+        kheap_shared_free(data_buf);
+    }
+    kheap_shared_free(payload);
+    return (int)result;
+}
+
+static const pup_devfs_file_ops_t g_devfs_proxy_ops = {
+    proxy_open,
+    proxy_close,
+    proxy_read,
+    proxy_write,
+    proxy_ioctl,
+};
 
 static int pup_devfs_ioctl(struct pup_fd *file, int cmd, void *args)
 {
@@ -206,6 +549,36 @@ static int pup_devfs_open(struct pup_fd *file)
     {
         PUP_LOG_ERROR(PUP_LOG_MODULE_CORE, "pup_devfs: device not found: %s", dev_name);
         return -2;
+    }
+
+    if (device->source_type == PUP_DEVFS_DEVICE_SOURCE_USER) {
+        if (!pup_channel_is_valid(device->channel_id)) {
+            PUP_LOG_ERROR(PUP_LOG_MODULE_CORE,
+                          "pup_devfs: user device '%s' has no valid channel", dev_name);
+            return PUP_FS_ENOSYS;
+        }
+
+        pup_devfs_file_t *ufile = (pup_devfs_file_t *)kheap_malloc(sizeof(pup_devfs_file_t));
+        if (ufile == PUP_NULL) {
+            return -5;
+        }
+        ufile->ops          = &g_devfs_proxy_ops;
+        ufile->device       = device;
+        ufile->flags        = file->flags;
+        ufile->private_data = PUP_NULL;
+        ufile->ref_count    = 1;
+
+        int uret = proxy_open(ufile);
+        if (uret < 0) {
+            kheap_free(ufile);
+            PUP_LOG_ERROR(PUP_LOG_MODULE_CORE,
+                          "pup_devfs: proxy open failed for '%s': %d", dev_name, uret);
+            return uret;
+        }
+
+        file->data = ufile;
+        file->type = FT_DEVICE;
+        return 0;
     }
 
     pup_devfs_file_t *pfile = (pup_devfs_file_t *)kheap_malloc(sizeof(pup_devfs_file_t));

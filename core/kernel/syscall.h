@@ -5,6 +5,9 @@
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
 #include "shared/pup_app_memory.h"
+#include "shared/pup_driver_abi.h"
+#include "shared/pup_channel_abi.h"
+#include "pup_channel.h"
 
 #define SYS_FD_STDIN   0
 #define SYS_FD_STDOUT  1
@@ -38,11 +41,24 @@
 #define SYS_SHARED_FREE      24
 #define SYS_SHARED_MEMALIGN  25
 #define SYS_APP_RAM_RANGE    26
+#define SYS_DEVFS_REGISTER   27
+#define SYS_DEVFS_UNREGISTER 28
+#define SYS_IRQ_SUBSCRIBE    29
+#define SYS_IRQ_UNSUBSCRIBE  30
+#define SYS_IRQ_WAIT         31
+
+#define SYS_CHANNEL_CREATE   32
+#define SYS_CHANNEL_DESTROY  33
+#define SYS_MSG_SEND         34
+#define SYS_MSG_RECEIVE      35
+#define SYS_MSG_REPLY        36
 
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 
 long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 void syscall_uart_rx_init(void);
+void syscall_cleanup_owner_resources(int owner_pid);
+void syscall_irq_notify(unsigned int irq_num);
 
 static inline long syscall_write(int fd, const char* buf, long len) {
     return syscall_handler(SYS_WRITE, fd, (long)buf, len, 0);

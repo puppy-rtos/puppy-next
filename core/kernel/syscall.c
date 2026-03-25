@@ -6,6 +6,7 @@
 #include "puppy_log.h"
 #include "mpu.h"
 #include "pup_fs.h"
+#include "pup_devfs.h"
 #include "pup_console.h"
 #include "kheap.h"
 #include "pup_sem.h"
@@ -18,6 +19,7 @@ void syscall_uart_rx_init(void)
 }
 
 #define MAX_USER_THREADS  4
+#define MAX_USER_IRQ_SUBSCRIPTIONS 8
 
 typedef struct {
     pthread_t thread;
@@ -33,9 +35,22 @@ typedef struct {
 
 static user_thread_t user_threads[MAX_USER_THREADS];
 
+typedef struct {
+    int used;
+    int owner_pid;
+    pup_user_irq_subscription_t subscription;
+    unsigned int pending_count;
+    int channel_id;   /* channel to deliver IRQ pulses; -1 = legacy irq_wait mode */
+} user_irq_subscription_entry_t;
+
+static user_irq_subscription_entry_t g_user_irq_subscriptions[MAX_USER_IRQ_SUBSCRIPTIONS];
+
 static void sys_exit_no_return(void) __attribute__((noreturn));
 static void sys_stack_guard_terminate_current_thread(const char* stage) __attribute__((noreturn));
 static long sys_exit(long arg1, long arg2, long arg3, long arg4);
+
+static int sys_user_range_valid(app_process_t* app, const void* ptr, unsigned int size);
+static int sys_user_string_valid(app_process_t* app, const char* str, unsigned int max_len);
 
 static void sys_exit_no_return(void) {
     while (1) {
@@ -483,7 +498,7 @@ static long sys_shared_memalign(long arg1, long arg2, long arg3, long arg4) {
     return (long)ptr;
 }
 
-static int sys_user_writable_range_valid(app_process_t* app, const void* ptr, unsigned int size) {
+static int sys_user_range_valid(app_process_t* app, const void* ptr, unsigned int size) {
     unsigned int app_start;
     unsigned int app_end;
     unsigned int ptr_start;
@@ -505,6 +520,26 @@ static int sys_user_writable_range_valid(app_process_t* app, const void* ptr, un
     return (ptr_start >= app_start) && (ptr_end <= app_end);
 }
 
+static int sys_user_string_valid(app_process_t* app, const char* str, unsigned int max_len) {
+    unsigned int i;
+
+    if (!app || !str || max_len == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < max_len; i++) {
+        if (!sys_user_range_valid(app, str + i, 1)) {
+            return 0;
+        }
+
+        if (str[i] == '\0') {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static long sys_app_ram_range(long arg1, long arg2, long arg3, long arg4) {
     pup_app_ram_range_t* range = (pup_app_ram_range_t*)arg1;
     app_process_t* app = app_get_current();
@@ -513,7 +548,7 @@ static long sys_app_ram_range(long arg1, long arg2, long arg3, long arg4) {
         return -1;
     }
 
-    if (!sys_user_writable_range_valid(app, range, sizeof(*range))) {
+    if (!sys_user_range_valid(app, range, sizeof(*range))) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_app_ram_range: invalid user buffer 0x%08x", (unsigned int)range);
         return -1;
     }
@@ -521,6 +556,251 @@ static long sys_app_ram_range(long arg1, long arg2, long arg3, long arg4) {
     range->ram_start = app->memory_base;
     range->ram_end = app->memory_base + app->memory_size;
     return 0;
+}
+
+static long sys_devfs_register(long arg1, long arg2, long arg3, long arg4) {
+    const pup_user_devfs_registration_t* registration = (const pup_user_devfs_registration_t*)arg1;
+    app_process_t* app = app_get_current();
+
+    if (!app || !registration) {
+        return -1;
+    }
+
+    if (!sys_user_range_valid(app, registration, sizeof(*registration))) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_devfs_register: invalid registration buffer");
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, registration->name, PUP_DEVFS_MAX_NAME_LEN + 1U)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_devfs_register: invalid device name");
+        return -1;
+    }
+
+    if (registration->channel_id < 0 || !pup_channel_is_owner(registration->channel_id, app->pid)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
+                      "sys_devfs_register: invalid channel owner (pid=%d ch=%d)",
+                      app->pid, registration->channel_id);
+        return -1;
+    }
+
+    return pup_devfs_register_user_device(registration, app->pid);
+}
+
+static long sys_devfs_unregister(long arg1, long arg2, long arg3, long arg4) {
+    const char* name = (const char*)arg1;
+    app_process_t* app = app_get_current();
+
+    if (!app || !name) {
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, name, PUP_DEVFS_MAX_NAME_LEN + 1U)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_devfs_unregister: invalid device name");
+        return -1;
+    }
+
+    return pup_devfs_unregister_user_device(name, app->pid);
+}
+
+static long sys_irq_subscribe(long arg1, long arg2, long arg3, long arg4) {
+    const pup_user_irq_subscription_t* subscription = (const pup_user_irq_subscription_t*)arg1;
+    app_process_t* app = app_get_current();
+    int i;
+
+    if (!app || !subscription) {
+        return -1;
+    }
+
+    if (!sys_user_range_valid(app, subscription, sizeof(*subscription))) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_irq_subscribe: invalid subscription buffer");
+        return -1;
+    }
+
+    if (subscription->channel_id >= 0 &&
+        !pup_channel_is_owner(subscription->channel_id, app->pid)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
+                      "sys_irq_subscribe: invalid channel owner pid=%d ch=%d",
+                      app->pid, subscription->channel_id);
+        return -1;
+    }
+
+    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
+        if (!g_user_irq_subscriptions[i].used) {
+            g_user_irq_subscriptions[i].used = 1;
+            g_user_irq_subscriptions[i].owner_pid = app->pid;
+            g_user_irq_subscriptions[i].subscription = *subscription;
+            g_user_irq_subscriptions[i].pending_count = 0;
+            g_user_irq_subscriptions[i].channel_id = subscription->channel_id;
+            PUP_LOG_INFO(PUP_LOG_MODULE_SYSCALL,
+                         "sys_irq_subscribe: pid=%d irq=%u handle=%d",
+                         app->pid,
+                         subscription->irq_num,
+                         i);
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static long sys_irq_unsubscribe(long arg1, long arg2, long arg3, long arg4) {
+    int handle = (int)arg1;
+    app_process_t* app = app_get_current();
+
+    if (!app || handle < 0 || handle >= MAX_USER_IRQ_SUBSCRIPTIONS) {
+        return -1;
+    }
+
+    if (!g_user_irq_subscriptions[handle].used ||
+        g_user_irq_subscriptions[handle].owner_pid != app->pid) {
+        return -1;
+    }
+
+    libcm_memset(&g_user_irq_subscriptions[handle], 0, sizeof(g_user_irq_subscriptions[handle]));
+    return 0;
+}
+
+static long sys_irq_wait(long arg1, long arg2, long arg3, long arg4) {
+    int handle = (int)arg1;
+    int timeout_ticks = (int)arg2;
+    app_process_t* app = app_get_current();
+    user_irq_subscription_entry_t* entry;
+
+    if (!app || handle < 0 || handle >= MAX_USER_IRQ_SUBSCRIPTIONS) {
+        return -1;
+    }
+
+    entry = &g_user_irq_subscriptions[handle];
+    if (!entry->used || entry->owner_pid != app->pid) {
+        return -1;
+    }
+
+    if (entry->pending_count > 0U) {
+        entry->pending_count--;
+        return 1;
+    }
+
+    if (timeout_ticks > 0) {
+        pthread_delay(timeout_ticks);
+    }
+
+    return 0;
+}
+
+void syscall_irq_notify(unsigned int irq_num)
+{
+    int i;
+
+    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
+        user_irq_subscription_entry_t *entry = &g_user_irq_subscriptions[i];
+
+        if (!entry->used || entry->subscription.irq_num != irq_num) {
+            continue;
+        }
+
+        if (entry->channel_id >= 0 && pup_channel_is_valid(entry->channel_id)) {
+            /* Preferred path: IRQ event as channel pulse. */
+            if (pup_channel_post_pulse(entry->channel_id, (int)irq_num, 0) == 0) {
+                continue;
+            }
+        }
+
+        /* Fallback path for legacy irq_wait() mode or pulse queue full. */
+        entry->pending_count++;
+    }
+}
+
+void syscall_cleanup_owner_resources(int owner_pid) {
+    int i;
+
+    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
+        if (g_user_irq_subscriptions[i].used && g_user_irq_subscriptions[i].owner_pid == owner_pid) {
+            libcm_memset(&g_user_irq_subscriptions[i], 0, sizeof(g_user_irq_subscriptions[i]));
+        }
+    }
+}
+
+/* -----------------------------------------------------------------------
+ * Channel + Message IPC syscalls
+ * --------------------------------------------------------------------- */
+
+static long sys_channel_create(long arg1, long arg2, long arg3, long arg4)
+{
+    app_process_t *app = app_get_current();
+    if (!app) {
+        return -1;
+    }
+    return (long)pup_channel_create(app->pid);
+}
+
+static long sys_channel_destroy(long arg1, long arg2, long arg3, long arg4)
+{
+    int channel_id = (int)arg1;
+    app_process_t *app = app_get_current();
+    if (!app) {
+        return -1;
+    }
+    /* Only the owner may destroy its channel */
+    if (!pup_channel_is_owner(channel_id, app->pid)) {
+        return -1;
+    }
+    return (long)pup_channel_destroy(channel_id);
+}
+
+static long sys_msg_send(long arg1, long arg2, long arg3, long arg4)
+{
+    int   channel_id = (int)arg1;
+    void *buf        = (void *)arg2;
+    int   buf_sz     = (int)arg3;
+    app_process_t *app = app_get_current();
+
+    if (!app || !buf || buf_sz < 0) {
+        return -1;
+    }
+    /* buf must be in shared memory (accessible by both sides) */
+    return pup_channel_send(channel_id, buf, buf_sz);
+}
+
+static long sys_msg_receive(long arg1, long arg2, long arg3, long arg4)
+{
+    int                channel_id = (int)arg1;
+    pup_channel_msg_t *out_msg    = (pup_channel_msg_t *)arg2;
+    app_process_t     *app        = app_get_current();
+    pup_channel_msg_t  kernel_msg;
+    int                cookie;
+
+    if (!app || !out_msg) {
+        return -1;
+    }
+    if (!pup_channel_is_owner(channel_id, app->pid)) {
+        return -1;
+    }
+    if (!sys_user_range_valid(app, out_msg, sizeof(*out_msg))) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
+                      "sys_msg_receive: invalid out_msg buffer");
+        return -1;
+    }
+
+    cookie = pup_channel_receive(channel_id, &kernel_msg);
+    if (cookie >= 0) {
+        /* Copy message to user memory */
+        *out_msg = kernel_msg;
+    }
+    return (long)cookie;
+}
+
+static long sys_msg_reply(long arg1, long arg2, long arg3, long arg4)
+{
+    int  channel_id = (int)arg1;
+    int  cookie     = (int)arg2;
+    long result     = arg3;
+
+    app_process_t *app = app_get_current();
+    if (!app || !pup_channel_is_owner(channel_id, app->pid)) {
+        return -1;
+    }
+
+    return (long)pup_channel_reply(channel_id, cookie, result);
 }
 
 static const syscall_func_t syscall_table[] = {
@@ -550,6 +830,16 @@ static const syscall_func_t syscall_table[] = {
     [SYS_SHARED_FREE] = sys_shared_free,
     [SYS_SHARED_MEMALIGN] = sys_shared_memalign,
     [SYS_APP_RAM_RANGE] = sys_app_ram_range,
+    [SYS_DEVFS_REGISTER] = sys_devfs_register,
+    [SYS_DEVFS_UNREGISTER] = sys_devfs_unregister,
+    [SYS_IRQ_SUBSCRIBE] = sys_irq_subscribe,
+    [SYS_IRQ_UNSUBSCRIBE] = sys_irq_unsubscribe,
+    [SYS_IRQ_WAIT] = sys_irq_wait,
+    [SYS_CHANNEL_CREATE]  = sys_channel_create,
+    [SYS_CHANNEL_DESTROY] = sys_channel_destroy,
+    [SYS_MSG_SEND]        = sys_msg_send,
+    [SYS_MSG_RECEIVE]     = sys_msg_receive,
+    [SYS_MSG_REPLY]       = sys_msg_reply,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

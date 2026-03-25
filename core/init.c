@@ -68,7 +68,8 @@ void *puppy_main_thread(void *arg) {
         
     PUP_LOG_INFO(PUP_LOG_MODULE_DEV, "Registering devices");
     dev_uart_init();
-    dev_gpio_init();
+    /* GPIO/LED/KEY are served by user-mode driver (Channel+Pulse path). */
+    dev_gpio_irq_bridge_init();
     dev_spi_init();
 
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Registering romfs");
@@ -91,6 +92,10 @@ void *puppy_main_thread(void *arg) {
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "File system initialized");
 
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting user shell");
+    if (app_exec("driver", "/rom/driver", NULL, 0) < 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start driver");
+    }
+
     if (app_exec("shell", "/rom/shell", NULL, 0) < 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start user shell");
     }

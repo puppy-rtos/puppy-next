@@ -178,7 +178,7 @@ static unsigned int app_mpu_choose_region_size(unsigned int app_base, unsigned i
 }
 
 int app_loader_init(void) {
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App loader initialized");
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App loader initialized");
     return 0;
 }
 
@@ -331,7 +331,7 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     app->text_start = header->text_start;
     app->got_base = 0;
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App loaded from flash: 0x%08x", (unsigned int)flash_addr);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App loaded from flash: 0x%08x", (unsigned int)flash_addr);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack addr: 0x%08x, size: %u", header->stack_addr, header->stack_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Arg area: 0x%08x - 0x%08x, size=%u",
                   header->arg_start, header->arg_end, app->arg_size);
@@ -395,36 +395,36 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     b_sub_map[8] = '\0';
 
     /* Print app memory layout and precise MPU configuration */
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "=== App Memory Layout ===");
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  RAM:   0x%08x - 0x%08x (%d bytes, allocated)",
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "=== App Memory Layout ===");
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  RAM:   0x%08x - 0x%08x (%d bytes, allocated)",
                  ram_base, ram_base + ram_size, ram_size);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Actual: 0x%08x - 0x%08x (%d bytes, used)",
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Actual: 0x%08x - 0x%08x (%d bytes, used)",
                  ram_base, app_actual_end, app_actual_size);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Stack: 0x%08x - 0x%08x (%d bytes)",
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Stack: 0x%08x - 0x%08x (%d bytes)",
                  (unsigned int)app->stack_addr,
                  (unsigned int)app->stack_addr + app->stack_size,
                  app->stack_size);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "=== Precise MPU Regions (Dual Overlapping) ===");
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [ALLOW] App Actual: 0x%08x - 0x%08x (RWX)", ram_base, app_actual_end);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "=== Precise MPU Regions (Dual Overlapping) ===");
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  [ALLOW] App Actual: 0x%08x - 0x%08x (RWX)", ram_base, app_actual_end);
     if (region_size >= 1024) {
-        PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Granularity: region=%uKB, subregion=%uB",
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Granularity: region=%uKB, subregion=%uB",
                      region_size / 1024, subregion_size);
     } else {
-        PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Granularity: region=%uB, subregion=%uB",
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Granularity: region=%uB, subregion=%uB",
                      region_size, subregion_size);
     }
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Front Region: 0x%08x - 0x%08x (%uB, sub: %s, mask=0x%02x)",
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Front Region: 0x%08x - 0x%08x (%uB, sub: %s, mask=0x%02x)",
                  f_base, f_base + region_size, region_size, f_sub_map, f_sub_mask);
     if (b_region_enabled) {
-        PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Back Region:  0x%08x - 0x%08x (%uB, sub: %s, mask=0x%02x)",
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Back Region:  0x%08x - 0x%08x (%uB, sub: %s, mask=0x%02x)",
                      b_base, b_base + region_size, region_size, b_sub_map, b_sub_mask);
     } else {
-        PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Back Region:  disabled (single-region coverage)");
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Back Region:  disabled (single-region coverage)");
     }
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "    Note: Regions overlap to cover actual range [%08x, %08x)",
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "    Note: Regions overlap to cover actual range [%08x, %08x)",
                  ram_base, app_actual_end);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [ALLOW] Flash:    0x%08x - 0x%08x (RX)", 0x08000000, 0x08100000);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [DENY]  Kernel:   0x%08x - 0x%08x (Privileged only)", 0x20000000, 0x20010000);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  [ALLOW] Flash:    0x%08x - 0x%08x (RX)", 0x08000000, 0x08100000);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  [DENY]  Kernel:   0x%08x - 0x%08x (Privileged only)", 0x20000000, 0x20010000);
     
     if (data_size > 0) {
         PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Initializing .data segment...");
@@ -557,7 +557,7 @@ int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out) {
         return -1;
     }
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running user app at 0x%08x", (unsigned int)app->entry);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Running user app at 0x%08x", (unsigned int)app->entry);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Using app stack: addr=0x%08x, size=%d", 
                (unsigned int)app->stack_addr, app->stack_size);
     

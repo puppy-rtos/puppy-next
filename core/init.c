@@ -91,13 +91,14 @@ void *puppy_main_thread(void *arg) {
     
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "File system initialized");
 
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting user shell");
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting driver");
     if (app_exec("driver", "/rom/driver", NULL, 0) < 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start driver");
     }
-
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Starting shell");
     if (app_exec("shell", "/rom/shell", NULL, 0) < 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start user shell");
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start shell");
     }
 
     /* Keep main thread alive and periodically reap zombie threads. */

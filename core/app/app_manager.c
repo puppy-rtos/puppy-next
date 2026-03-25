@@ -106,7 +106,7 @@ static void app_mpu_prepare_cache(app_process_t* app) {
     app->mpu_cached_protected_end = protected_end;
     app->mpu_cached_version = g_mpu_cache_version++;
 
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP,
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP,
                  "MPU cache prepared: pid=%d ver=%u range=[0x%08x,0x%08x) region=%uB sub=%uB",
                  app->pid,
                  app->mpu_cached_version,
@@ -121,8 +121,8 @@ int app_manager_init(void) {
     next_pid = 1;
     current_app_process = NULL;
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App manager initialized (dynamic process table)");
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App memory uses dynamic user heap (aligned=%u)", APP_MEMORY_ALIGN);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App manager initialized (dynamic process table)");
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App memory uses dynamic user heap (aligned=%u)", APP_MEMORY_ALIGN);
     
     return 0;
 }
@@ -179,7 +179,7 @@ int app_alloc_memory(const char* name, unsigned int flash_addr, unsigned int fla
     app->next = g_app_list;
     g_app_list = app;
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Allocated app '%s' (pid=%d)", name, app->pid);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Allocated app '%s' (pid=%d)", name, app->pid);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Memory: 0x%08x - 0x%08x", 
                   app->memory_base, app->memory_base + app->memory_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack: 0x%08x (%d bytes)", 
@@ -225,7 +225,7 @@ void app_free_memory(int pid) {
         current_app_process = NULL;
     }
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Freed app '%s' (pid=%d)", 
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Freed app '%s' (pid=%d)", 
                  app->name, pid);
 
     kheap_free(app);
@@ -392,7 +392,7 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
         return -1;
     }
     
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Loading app '%s' from %s (%d bytes)", name, path, file_size);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Loading app '%s' from %s (%d bytes)", name, path, file_size);
 
     if (app_calc_memory_requirement(file_data, file_size, &app_mem_size) != 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to calculate app memory requirement: %s", name);
@@ -449,7 +449,7 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
     {
         unsigned int used_size = app->mpu_cached_protected_end - app->memory_base;
         unsigned int alloc_slack = (app->memory_size > used_size) ? (app->memory_size - used_size) : 0;
-        PUP_LOG_INFO(PUP_LOG_MODULE_APP,
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP,
                      "App memory summary: name=%s pid=%d alloc=%u used=%u protected=%u slack=%u",
                      app->name,
                      app->pid,
@@ -459,7 +459,7 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
                      alloc_slack);
     }
 
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running app '%s'", name);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Running app '%s'", name);
 
     if (app_run(&app->image, name, &app->thread) != 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start app thread: %s", name);
@@ -475,7 +475,7 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
 
     exit_code = app_wait(pid);
     app_free_memory(pid);
-    PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App '%s' completed with code %d", name, exit_code);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App '%s' completed with code %d", name, exit_code);
     return exit_code;
 }
 

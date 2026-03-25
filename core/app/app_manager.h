@@ -32,6 +32,15 @@ typedef struct app_process {
     unsigned int got_start;
     unsigned int got_end;
     unsigned int text_start;
+    unsigned int mpu_cached_valid;
+    unsigned int mpu_cached_region_size;
+    unsigned int mpu_cached_subregion_size;
+    unsigned int mpu_cached_front_base;
+    unsigned int mpu_cached_back_base;
+    unsigned int mpu_cached_front_mask;
+    unsigned int mpu_cached_back_mask;
+    unsigned int mpu_cached_protected_end;
+    unsigned int mpu_cached_version;
     pthread_t thread;
     int exit_code;
     user_app_t image;

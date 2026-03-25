@@ -127,6 +127,11 @@ void dtm_mpu_dump(void);
 int dtm_mpu_setup_user_protection(void);
 int dtm_mpu_setup_kernel_protection(void);
 int dtm_mpu_setup_app_protection(uint32_t app_ram_base, uint32_t app_ram_size);
+int dtm_mpu_apply_cached_app_profile(uint32_t region_size,
+                                     uint32_t front_base,
+                                     uint32_t back_base,
+                                     uint32_t front_sub_mask,
+                                     uint32_t back_sub_mask);
 int dtm_mpu_isolate_app_region(uint32_t app_ram_base, uint32_t app_ram_size);
 
 int dtm_mpu_setup_app_isolation(uint32_t current_app_base, uint32_t current_app_size,

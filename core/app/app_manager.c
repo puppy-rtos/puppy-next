@@ -16,8 +16,106 @@
 static app_process_t* g_app_list = NULL;
 static int next_pid = 1;
 app_process_t* current_app_process = NULL;
+static unsigned int g_mpu_cache_version = 1;
 
 static int app_exec_internal(const char* name, const char* path, const char* arg, int wait);
+
+static unsigned int app_mpu_choose_region_size(unsigned int app_base, unsigned int app_size) {
+    unsigned int region_size = 256;
+    unsigned int app_end = app_base + app_size;
+
+    if (app_size == 0 || app_end < app_base) {
+        return 256;
+    }
+
+    while (region_size <= (1024U * 1024U)) {
+        unsigned int front_base = app_base & ~(region_size - 1U);
+        unsigned long long coverage_end = (unsigned long long)front_base + ((unsigned long long)region_size * 2ULL);
+
+        if ((unsigned long long)app_end <= coverage_end) {
+            return region_size;
+        }
+
+        region_size <<= 1U;
+    }
+
+    return 1024U * 1024U;
+}
+
+static void app_mpu_prepare_cache(app_process_t* app) {
+    unsigned int protected_end;
+    unsigned int got_size;
+    unsigned int region_size;
+    unsigned int subregion_size;
+    unsigned int f_base;
+    unsigned int b_base;
+    unsigned int f_mask = 0;
+    unsigned int b_mask = 0xFF;
+
+    if (!app) {
+        return;
+    }
+
+    protected_end = app->memory_base + (app->image.compiled_ram_end - app->image.compiled_ram_start);
+    got_size = (app->got_end > app->got_start) ? (app->got_end - app->got_start) : 0;
+
+    if (app->got_base != 0 && got_size > 0) {
+        unsigned int got_end = app->got_base + got_size;
+        if (got_end > protected_end) {
+            protected_end = got_end;
+        }
+    }
+
+    if (app->entry_addr != 0) {
+        unsigned int arg_end = app->app_arg_base + APP_EXEC_ARG_AREA_SIZE;
+        if (arg_end > protected_end) {
+            protected_end = arg_end;
+        }
+    }
+
+    region_size = app_mpu_choose_region_size(app->memory_base, protected_end - app->memory_base);
+    subregion_size = region_size / 8U;
+    f_base = app->memory_base & ~(region_size - 1U);
+    b_base = (protected_end - 1U) & ~(region_size - 1U);
+
+    for (int i = 0; i < 8; i++) {
+        unsigned int s = f_base + i * subregion_size;
+        unsigned int e = s + subregion_size;
+        if (!(s < protected_end && e > app->memory_base)) {
+            f_mask |= (1U << i);
+        }
+    }
+
+    if (b_base != f_base) {
+        b_mask = 0;
+        for (int i = 0; i < 8; i++) {
+            unsigned int s = b_base + i * subregion_size;
+            unsigned int e = s + subregion_size;
+            if (!(s < protected_end && e > app->memory_base)) {
+                b_mask |= (1U << i);
+            }
+        }
+    }
+
+    app->mpu_cached_valid = 1;
+    app->mpu_cached_region_size = region_size;
+    app->mpu_cached_subregion_size = subregion_size;
+    app->mpu_cached_front_base = f_base;
+    app->mpu_cached_back_base = b_base;
+    app->mpu_cached_front_mask = f_mask;
+    app->mpu_cached_back_mask = b_mask;
+    app->mpu_cached_protected_end = protected_end;
+    app->mpu_cached_version = g_mpu_cache_version++;
+
+    PUP_LOG_INFO(PUP_LOG_MODULE_APP,
+                 "MPU cache prepared: pid=%d ver=%u range=[0x%08x,0x%08x) region=%uB sub=%uB",
+                 app->pid,
+                 app->mpu_cached_version,
+                 app->memory_base,
+                 app->mpu_cached_protected_end,
+                 app->mpu_cached_region_size,
+                 app->mpu_cached_subregion_size);
+}
 
 int app_manager_init(void) {
     g_app_list = NULL;
@@ -355,6 +453,8 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
         libcm_strncpy((char*)app->app_arg_base, arg, APP_EXEC_ARG_AREA_SIZE - 1);
     }
     app->image.entry_arg = (void*)app->app_arg_base;
+
+    app_mpu_prepare_cache(app);
 
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running app '%s'", name);
 

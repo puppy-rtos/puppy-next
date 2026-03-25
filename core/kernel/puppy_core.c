@@ -31,6 +31,8 @@ static pup_list_t _g_zombie_list = { &_g_zombie_list, &_g_zombie_list };
 static pup_tick_t _g_tick = 0;
 static pup_list_t _g_timeout_list = { &_g_timeout_list, &_g_timeout_list };
 static volatile pup_uint8_t _g_sched_runtime_ready = 0;
+static int _g_active_mpu_pid = -1;
+static unsigned int _g_active_mpu_cache_version = 0;
 
 pup_tick_t pup_tick_get(void)
 {
@@ -311,6 +313,7 @@ static int pup_thread_ptr_valid(struct _pthread_obj* thread) {
 
 void pup_sched_swap_done_cb(void) {
     struct pup_cpu* cpu = pup_cpu_self();
+    app_process_t* next_app = PUP_NULL;
 
 #if PUP_SCHED_GUARD_ENABLED
     if (!cpu) {
@@ -326,6 +329,37 @@ void pup_sched_swap_done_cb(void) {
 
     cpu->next_thread->state = PUP_THREAD_STATE_RUN;
     cpu->curr_thread = cpu->next_thread;
+
+    if (cpu->curr_thread->attr.is_user_thread) {
+        next_app = app_find_by_thread((pthread_t)cpu->curr_thread);
+        if (next_app && next_app->mpu_cached_valid) {
+            if (_g_active_mpu_pid != next_app->pid ||
+                _g_active_mpu_cache_version != next_app->mpu_cached_version) {
+                if (pup_mpu_apply_cached_app_profile(next_app->mpu_cached_region_size,
+                                                     next_app->mpu_cached_front_base,
+                                                     next_app->mpu_cached_back_base,
+                                                     next_app->mpu_cached_front_mask,
+                                                     next_app->mpu_cached_back_mask) != 0) {
+                    PUP_LOG_ERROR(PUP_LOG_MODULE_MPU,
+                                  "Failed to apply cached MPU profile: pid=%d ver=%u",
+                                  next_app->pid,
+                                  next_app->mpu_cached_version);
+                } else {
+                    _g_active_mpu_pid = next_app->pid;
+                    _g_active_mpu_cache_version = next_app->mpu_cached_version;
+                }
+            }
+            current_app_process = next_app;
+        } else {
+            /* Fallback for non-app user threads to avoid inheriting stale app profile. */
+            pup_mpu_setup_user_protection();
+            _g_active_mpu_pid = -1;
+            _g_active_mpu_cache_version = 0;
+            current_app_process = PUP_NULL;
+        }
+    } else {
+        current_app_process = PUP_NULL;
+    }
     
     if (pup_stack_guard_check(cpu->curr_thread) != 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SCHED, "Stack guard violation detected, terminating thread '%s'", 
@@ -333,9 +367,7 @@ void pup_sched_swap_done_cb(void) {
         cpu->curr_thread->state = PUP_THREAD_STATE_DEAD;
     }
     
-    /* MPU protection is set up when app starts, not during context switch
-     * This avoids complex MPU operations in interrupt context
-     */
+    /* Keep MPU profile synchronized with the currently running user app. */
     (void)cpu;
     
     cpu->next_thread = PUP_NULL;

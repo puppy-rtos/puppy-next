@@ -58,6 +58,18 @@ int pup_mpu_setup_app_protection(pup_uint32_t app_ram_base, pup_uint32_t app_ram
     return dtm_mpu_setup_app_protection(app_ram_base, app_ram_size);
 }
 
+int pup_mpu_apply_cached_app_profile(pup_uint32_t region_size,
+                                     pup_uint32_t front_base,
+                                     pup_uint32_t back_base,
+                                     pup_uint32_t front_sub_mask,
+                                     pup_uint32_t back_sub_mask) {
+    return dtm_mpu_apply_cached_app_profile(region_size,
+                                            front_base,
+                                            back_base,
+                                            front_sub_mask,
+                                            back_sub_mask);
+}
+
 int pup_mpu_isolate_app_region(pup_uint32_t app_ram_base, pup_uint32_t app_ram_size) {
     return dtm_mpu_isolate_app_region(app_ram_base, app_ram_size);
 }

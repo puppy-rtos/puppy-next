@@ -129,6 +129,11 @@ static uint32_t dtm_mpu_align_addr(uint32_t addr, uint32_t size) {
     return addr & ~(size - 1);
 }
 
+static int dtm_mpu_is_power_of_two(uint32_t value)
+{
+    return (value != 0U) && ((value & (value - 1U)) == 0U);
+}
+
 int dtm_mpu_region_set(uint32_t region_num, uint32_t base_addr, uint32_t size, uint32_t attributes) {
     uint32_t rasr;
     uint32_t size_encode;
@@ -323,53 +328,50 @@ static void dtm_mpu_config_precise_region(uint32_t app_base, uint32_t app_size,
     *b_sub_mask = b_sub;
 }
 
-int dtm_mpu_setup_app_protection(uint32_t app_ram_base, uint32_t app_ram_size) {
-    uint32_t f_sub_mask, b_sub_mask, region_size;
-    uint32_t f_base, b_base;
-    uint32_t f_size_encode, b_size_encode;
-    uint32_t f_rasr, b_rasr;
+static int dtm_mpu_apply_profile_internal(uint32_t region_size,
+                                          uint32_t f_base,
+                                          uint32_t b_base,
+                                          uint32_t f_sub_mask,
+                                          uint32_t b_sub_mask)
+{
+    uint32_t f_size_encode;
+    uint32_t b_size_encode;
+    uint32_t f_rasr;
+    uint32_t b_rasr;
+    uint32_t rasr;
+    uint32_t size_encode;
+
+    if (!dtm_mpu_is_power_of_two(region_size) || region_size < 256U || region_size > (1024U * 1024U)) {
+        return -1;
+    }
 
     dtm_mpu_disable();
 
-    /* Region 0: Flash - Read/Execute for all */
     dtm_mpu_region_set(0, DTM_MPU_KERNEL_FLASH_BASE, 1024 * 1024,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_EXEC);
 
-    /* Region 1: Kernel RAM (0x20000000-0x2000FFFF) - Privileged only, 64KB */
-    uint32_t rasr;
-    uint32_t size_encode = ARM_MPU_REGION_SIZE_64KB;
+    size_encode = ARM_MPU_REGION_SIZE_64KB;
     rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_PRIV, 0UL, 1UL, 1UL, 1UL, 0UL, size_encode);
     ARM_MPU_SetRegionEx(1, DTM_ARM_MPU_RBAR(1, DTM_MPU_KERNEL_RAM_BASE), rasr);
 
-    /* Calculate precise MPU configuration using two regions */
-    dtm_mpu_config_precise_region(app_ram_base, app_ram_size,
-                                   &f_sub_mask, &b_sub_mask, &f_base, &b_base, &region_size);
-
-    /* Calculate size encodes */
-    f_size_encode = dtm_ffs(region_size) - 1;
+    f_size_encode = dtm_ffs(region_size) - 1U;
     b_size_encode = f_size_encode;
 
-    /* Region 2: Front part of app RAM with sub-region masking */
     f_rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_FULL, 0UL, 1UL, 1UL, 1UL,
-                               f_sub_mask, f_size_encode);
+                              f_sub_mask, f_size_encode);
     ARM_MPU_SetRegionEx(2, DTM_ARM_MPU_RBAR(2, f_base), f_rasr);
 
-    /* Region 3: Back part of app RAM with sub-region masking
-     * Only enable if not all sub-regions are disabled */
-    if (b_sub_mask != 0xFF) {
+    if (b_sub_mask != 0xFFU) {
         b_rasr = DTM_ARM_MPU_RASR(0UL, ARM_MPU_AP_FULL, 0UL, 1UL, 1UL, 1UL,
-                                   b_sub_mask, b_size_encode);
+                                  b_sub_mask, b_size_encode);
         ARM_MPU_SetRegionEx(3, DTM_ARM_MPU_RBAR(3, b_base), b_rasr);
     } else {
-        /* All sub-regions disabled, clear this region */
         ARM_MPU_ClrRegion(3);
     }
-    
-    /* Region 4: Shared RAM - Full access (must be after app regions) */
+
     dtm_mpu_region_set(4, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
 
-    /* Clear regions 5-7 (not used) */
     ARM_MPU_ClrRegion(5);
     ARM_MPU_ClrRegion(6);
     ARM_MPU_ClrRegion(7);
@@ -377,6 +379,30 @@ int dtm_mpu_setup_app_protection(uint32_t app_ram_base, uint32_t app_ram_size) {
     dtm_mpu_enable();
 
     return 0;
+}
+
+int dtm_mpu_setup_app_protection(uint32_t app_ram_base, uint32_t app_ram_size) {
+    uint32_t f_sub_mask, b_sub_mask, region_size;
+    uint32_t f_base, b_base;
+
+    /* Calculate precise MPU configuration using two regions */
+    dtm_mpu_config_precise_region(app_ram_base, app_ram_size,
+                                   &f_sub_mask, &b_sub_mask, &f_base, &b_base, &region_size);
+
+    return dtm_mpu_apply_profile_internal(region_size, f_base, b_base, f_sub_mask, b_sub_mask);
+}
+
+int dtm_mpu_apply_cached_app_profile(uint32_t region_size,
+                                     uint32_t front_base,
+                                     uint32_t back_base,
+                                     uint32_t front_sub_mask,
+                                     uint32_t back_sub_mask)
+{
+    return dtm_mpu_apply_profile_internal(region_size,
+                                          front_base,
+                                          back_base,
+                                          front_sub_mask,
+                                          back_sub_mask);
 }
 
 int dtm_mpu_isolate_app_region(uint32_t app_ram_base, uint32_t app_ram_size) {

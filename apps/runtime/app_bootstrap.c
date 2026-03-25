@@ -12,6 +12,9 @@ extern int __data_end__;
 extern int __data_load__;
 extern int __bss_start__;
 extern int __bss_end__;
+extern int __user_app_stack_size;
+extern int __app_arg_start__;
+extern int __app_arg_end__;
 
 __attribute__((section(".app_header")))
 app_header_t app_header = {
@@ -19,8 +22,11 @@ app_header_t app_header = {
     .load_addr = 0x08080000,
     .entry_addr = (unsigned int)app_main,
     .app_size = 0,
-    .version = 0x00010000,
+    .version = 0x00020000,
     .stack_addr = (unsigned int)&_sstack,
+    .stack_size = (unsigned int)&__user_app_stack_size,
+    .arg_start = (unsigned int)&__app_arg_start__,
+    .arg_end = (unsigned int)&__app_arg_end__,
     .got_start = (unsigned int)&__got_start__,
     .got_end = (unsigned int)&__got_end__,
     .text_start = (unsigned int)&__text_start__,

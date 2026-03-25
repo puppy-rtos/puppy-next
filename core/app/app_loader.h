@@ -4,11 +4,14 @@
 #include <puppy_core.h>
 
 #define USER_APP_STACK_SIZE 0x2000
+#define USER_APP_ARG_AREA_SIZE 0x100
 
 typedef struct {
     void* entry;
     void* entry_arg;
     void* stack_addr;
+    pup_size_t stack_size;
+    pup_size_t arg_size;
     pup_size_t size;
     unsigned int pid;
     unsigned int flash_addr;
@@ -29,6 +32,9 @@ typedef struct {
     unsigned int app_size;
     unsigned int version;
     unsigned int stack_addr;
+    unsigned int stack_size;
+    unsigned int arg_start;
+    unsigned int arg_end;
     unsigned int got_start;
     unsigned int got_end;
     unsigned int text_start;

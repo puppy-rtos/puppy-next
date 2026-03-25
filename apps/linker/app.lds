@@ -6,6 +6,7 @@ MEMORY
 ENTRY(app_main)
 
 __user_app_stack_size = DEFINED(__user_app_stack_size) ? __user_app_stack_size : 0x2000;
+__user_app_arg_size = DEFINED(__user_app_arg_size) ? __user_app_arg_size : 0x100;
 
 SECTIONS
 {
@@ -81,6 +82,15 @@ SECTIONS
         . = ALIGN(4);
         __bss_end__ = .;
         _ebss = .;
+    } > USER_APP_RAM
+
+    .app_runtime :
+    {
+        . = ALIGN(8);
+        __app_arg_start__ = .;
+        . = . + __user_app_arg_size;
+        __app_arg_end__ = .;
+        . = ALIGN(8);
     } > USER_APP_RAM
 
     .stack :

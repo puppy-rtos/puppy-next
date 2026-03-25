@@ -72,6 +72,25 @@ class QemuCmdRunner:
             time.sleep(0.05)
         return False
 
+    def snapshot_len(self) -> int:
+        with self.lock:
+            return len(self.buffer)
+
+    def wait_for_text_since(self, text: str, start_len: int, timeout: float) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self.lock:
+                if text in self.buffer[start_len:]:
+                    return True
+            if self.process is not None and self.process.poll() is not None:
+                break
+            time.sleep(0.05)
+        return False
+
+    def count_occurrences(self, text: str) -> int:
+        with self.lock:
+            return self.buffer.count(text)
+
     def wait_for_echo(self, char: str, start_len: int, timeout: float) -> bool:
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -149,14 +168,64 @@ def run_default_sequence(runner: QemuCmdRunner) -> int:
 
     for step in steps:
         print(f"\n[runner] Step: {step['name']}")
+        start_len = runner.snapshot_len()
         if step["command"]:
             time.sleep(POST_PROMPT_DELAY)
             runner.send_command(step["command"])
         for expected in step["expects"]:
-            if not runner.wait_for_text(expected, step["timeout"]):
+            if not runner.wait_for_text_since(expected, start_len, step["timeout"]):
                 print(f"\n[runner] ERROR: missing expected text: {expected}")
                 return 1
             print(f"\n[runner] Matched: {expected}")
+    return 0
+
+
+def run_switch_stress_sequence(runner: QemuCmdRunner, cycles: int = 5) -> int:
+    print(f"\n[runner] Step: switch stress ({cycles} cycles)")
+    switch_log = "Applied cached MPU profile:"
+    before_count = runner.count_occurrences(switch_log)
+
+    for i in range(cycles):
+        print(f"\n[runner] Stress cycle {i + 1}/{cycles}")
+
+        # Start one lightweight app in background, then switch to another app in foreground.
+        start_len = runner.snapshot_len()
+        time.sleep(POST_PROMPT_DELAY)
+        runner.send_command("/rom/mpu_test self &")
+
+        bg_expects = [
+            "[APP/I] Running app 'mpu_test'",
+            "[mpu_test] Self RAM range:",
+            PROMPT,
+        ]
+        for expected in bg_expects:
+            if not runner.wait_for_text_since(expected, start_len, 12.0):
+                print(f"\n[runner] ERROR: missing background expected text: {expected}")
+                return 1
+            print(f"\n[runner] Matched: {expected}")
+
+        start_len = runner.snapshot_len()
+        time.sleep(POST_PROMPT_DELAY)
+        runner.send_command("/rom/test")
+
+        fg_expects = [
+            "[APP/I] Running app 'test'",
+            "=== Puppy User Test App ===",
+            PROMPT,
+        ]
+        for expected in fg_expects:
+            if not runner.wait_for_text_since(expected, start_len, 14.0):
+                print(f"\n[runner] ERROR: missing foreground expected text: {expected}")
+                return 1
+            print(f"\n[runner] Matched: {expected}")
+
+    after_count = runner.count_occurrences(switch_log)
+    delta = after_count - before_count
+    print(f"\n[runner] MPU switch log delta: {delta}")
+    if delta <= 0:
+        print(f"\n[runner] ERROR: no MPU switch log found: {switch_log}")
+        return 1
+
     return 0
 
 
@@ -182,7 +251,10 @@ def main() -> int:
     runner = QemuCmdRunner(args.qemu, args.machine, str(firmware_path))
     try:
         runner.start()
-        return run_default_sequence(runner)
+        ret = run_default_sequence(runner)
+        if ret != 0:
+            return ret
+        return run_switch_stress_sequence(runner)
     finally:
         runner.terminate()
         print("\n[runner] QEMU stopped")

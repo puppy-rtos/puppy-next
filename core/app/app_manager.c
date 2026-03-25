@@ -9,10 +9,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#ifndef ALIGN_UP
-#define ALIGN_UP(size, align)   (((size) + (align) - 1) & ~((align) - 1))
-#endif
-
 static app_process_t* g_app_list = NULL;
 static int next_pid = 1;
 app_process_t* current_app_process = NULL;
@@ -66,8 +62,8 @@ static void app_mpu_prepare_cache(app_process_t* app) {
         }
     }
 
-    if (app->entry_addr != 0) {
-        unsigned int arg_end = app->app_arg_base + APP_EXEC_ARG_AREA_SIZE;
+    if (app->entry_addr != 0 && app->image.arg_size > 0) {
+        unsigned int arg_end = app->app_arg_base + app->image.arg_size;
         if (arg_end > protected_end) {
             protected_end = arg_end;
         }
@@ -400,7 +396,6 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
         return -1;
     }
 
-    app_mem_size += APP_EXEC_ARG_AREA_SIZE;
     app_mem_size = (unsigned int)((app_mem_size + (APP_MEMORY_ALIGN - 1)) & ~(APP_MEMORY_ALIGN - 1));
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App '%s' memory requirement: %u bytes", name, app_mem_size);
@@ -427,34 +422,39 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
 
     app->image.pid = pid;
     app->stack_addr = (unsigned int)app->image.stack_addr;
+    app->stack_size = app->image.stack_size;
     app->entry_addr = (unsigned int)app->image.entry;
     app->got_base = app->image.got_base;
     app->got_start = app->image.got_start;
     app->got_end = app->image.got_end;
     app->text_start = app->image.text_start;
 
-    {
-        unsigned int app_runtime_end = app->memory_base + (app->image.compiled_ram_end - app->image.compiled_ram_start);
-        unsigned int got_size = (app->got_end > app->got_start) ? (app->got_end - app->got_start) : 0;
-        unsigned int memory_end = app->memory_base + app->memory_size;
-
-        if (app->got_base != 0 && got_size > 0) {
-            app_runtime_end = app->got_base + got_size;
-        }
-
-        app->app_arg_base = ALIGN_UP(app_runtime_end, 8);
-        if (app->app_arg_base + APP_EXEC_ARG_AREA_SIZE > memory_end) {
-            app->app_arg_base = memory_end - APP_EXEC_ARG_AREA_SIZE;
-        }
+    app->app_arg_base = (unsigned int)app->image.entry_arg;
+    if (app->image.arg_size == 0 || app->app_arg_base == 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid app arg area for '%s'", name);
+        app_free_memory(pid);
+        return -1;
     }
-    
-    libcm_memset((void*)app->app_arg_base, 0, APP_EXEC_ARG_AREA_SIZE);
+
+    libcm_memset((void*)app->app_arg_base, 0, app->image.arg_size);
     if (arg) {
-        libcm_strncpy((char*)app->app_arg_base, arg, APP_EXEC_ARG_AREA_SIZE - 1);
+        libcm_strncpy((char*)app->app_arg_base, arg, app->image.arg_size - 1);
     }
-    app->image.entry_arg = (void*)app->app_arg_base;
 
     app_mpu_prepare_cache(app);
+
+    {
+        unsigned int used_size = app->mpu_cached_protected_end - app->memory_base;
+        unsigned int alloc_slack = (app->memory_size > used_size) ? (app->memory_size - used_size) : 0;
+        PUP_LOG_INFO(PUP_LOG_MODULE_APP,
+                     "App memory summary: name=%s pid=%d alloc=%u used=%u protected=%u slack=%u",
+                     app->name,
+                     app->pid,
+                     app->memory_size,
+                     used_size,
+                     app->mpu_cached_protected_end - app->memory_base,
+                     alloc_slack);
+    }
 
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running app '%s'", name);
 

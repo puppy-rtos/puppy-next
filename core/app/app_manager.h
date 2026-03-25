@@ -8,7 +8,6 @@
 #define APP_NAME_MAX_LEN        32
 #define APP_MEMORY_ALIGN        4096  /* Align to 4KB for MPU subregion boundary */
 #define APP_STACK_SIZE          (8 * 1024)
-#define APP_EXEC_ARG_AREA_SIZE  256
 
 #define APP_STATE_IDLE          0
 #define APP_STATE_LOADING       1

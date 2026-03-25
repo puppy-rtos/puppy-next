@@ -74,7 +74,7 @@ target("puppy")
         os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/puppy.bin", target:targetfile())
     end)
 
-function define_user_app_target(target_name, app_source, output_bin_name)
+function define_user_app_target(target_name, app_source, output_bin_name, stack_size)
     target(target_name)
         set_kind("binary")
         set_extension(".elf")
@@ -88,6 +88,9 @@ function define_user_app_target(target_name, app_source, output_bin_name)
         add_mode_compile_flags()
         add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
         add_ldflags(' -T ' .. os.scriptdir() .. '/apps/linker/app.lds')
+        if stack_size ~= nil then
+            add_ldflags(' -Wl,--defsym,__user_app_stack_size=' .. stack_size)
+        end
 
         add_includedirs("apps/include", "core")
 
@@ -105,9 +108,9 @@ function define_user_app_target(target_name, app_source, output_bin_name)
 end
 
 define_user_app_target("hello", "apps/hello/main.c", "hello.bin")
-define_user_app_target("shell", "apps/shell/main.c", "shell.bin")
+define_user_app_target("shell", "apps/shell/main.c", "shell.bin", "0x1000")
 define_user_app_target("test", "apps/test/main.c", "test.bin")
-define_user_app_target("mpu_test", "apps/mpu_test/main.c", "mpu_test.bin")
+define_user_app_target("mpu_test", "apps/mpu_test/main.c", "mpu_test.bin", "0x1000")
 
 target("firmware")
     set_kind("phony")

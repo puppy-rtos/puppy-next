@@ -201,6 +201,8 @@ static int app_validate(void* flash_addr, pup_size_t size) {
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Entry addr: 0x%08x", header->entry_addr);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  App size: %d bytes", header->app_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Version: 0x%08x", header->version);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Stack: start=0x%08x size=%u", header->stack_addr, header->stack_size);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Arg area: 0x%08x - 0x%08x", header->arg_start, header->arg_end);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  GOT: 0x%08x - 0x%08x", header->got_start, header->got_end);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Text start: 0x%08x", header->text_start);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  Rel: 0x%08x - 0x%08x", header->rel_start, header->rel_end);
@@ -231,12 +233,23 @@ int app_calc_memory_requirement(void* flash_addr, pup_size_t size, unsigned int*
         return -1;
     }
 
-    if (header->data_start == 0 || header->stack_addr < header->data_start) {
+    if (header->data_start == 0 || header->stack_addr < header->data_start || header->stack_size == 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid RAM layout in app header");
         return -1;
     }
 
-    ram_image_size = (header->stack_addr + USER_APP_STACK_SIZE) - header->data_start;
+    if (header->arg_end <= header->arg_start) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid app arg range");
+        return -1;
+    }
+
+    if (header->arg_start < header->data_start ||
+        header->arg_end > (header->stack_addr + header->stack_size)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App arg range is outside runtime RAM image");
+        return -1;
+    }
+
+    ram_image_size = (header->stack_addr + header->stack_size) - header->data_start;
     got_size = (header->got_end > header->got_start) ? (header->got_end - header->got_start) : 0;
     total_size = ram_image_size + got_size;
 
@@ -273,15 +286,26 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
         return -1;
     }
 
-    if (header->data_start == 0 || header->stack_addr < header->data_start) {
+    if (header->data_start == 0 || header->stack_addr < header->data_start || header->stack_size == 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid RAM layout in app header");
+        return -1;
+    }
+
+    if (header->arg_end <= header->arg_start) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Invalid app arg range");
+        return -1;
+    }
+
+    if (header->arg_start < header->data_start ||
+        header->arg_end > (header->stack_addr + header->stack_size)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App arg range is outside runtime RAM image");
         return -1;
     }
 
     load_offset = (unsigned int)flash_addr - header->load_addr;
     data_size = (header->data_end > header->data_start) ? (header->data_end - header->data_start) : 0;
     bss_size = (header->bss_end > header->bss_start) ? (header->bss_end - header->bss_start) : 0;
-    ram_image_size = (header->stack_addr + USER_APP_STACK_SIZE) - header->data_start;
+    ram_image_size = (header->stack_addr + header->stack_size) - header->data_start;
     got_size = (header->got_end > header->got_start) ? (header->got_end - header->got_start) : 0;
 
     if (ram_image_size > ram_size || ram_image_size + got_size > ram_size) {
@@ -293,21 +317,25 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     libcm_memset((void *)ram_base, 0, ram_size);
     
     app->entry = (void *)((unsigned int)flash_addr + (header->entry_addr - header->load_addr));
-    app->entry_arg = NULL;
+    app->entry_arg = (void *)(ram_base + (header->arg_start - header->data_start));
     app->stack_addr = (void *)(ram_base + (header->stack_addr - header->data_start));
+    app->stack_size = header->stack_size;
+    app->arg_size = header->arg_end - header->arg_start;
     app->size = size;
     app->flash_addr = (unsigned int)flash_addr;
     app->ram_base = ram_base;
     app->ram_size = ram_size;
     app->compiled_ram_start = header->data_start;
-    app->compiled_ram_end = header->stack_addr + USER_APP_STACK_SIZE;
+    app->compiled_ram_end = header->stack_addr + header->stack_size;
     app->got_start = header->got_start;
     app->got_end = header->got_end;
     app->text_start = header->text_start;
     app->got_base = 0;
     
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "App loaded from flash: 0x%08x", (unsigned int)flash_addr);
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack addr: 0x%08x, size: %d", header->stack_addr, USER_APP_STACK_SIZE);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack addr: 0x%08x, size: %u", header->stack_addr, header->stack_size);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Arg area: 0x%08x - 0x%08x, size=%u",
+                  header->arg_start, header->arg_end, app->arg_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Load offset: 0x%08x", load_offset);
     
     /* Calculate app actual memory usage (not the allocated size)
@@ -374,7 +402,9 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Actual: 0x%08x - 0x%08x (%d bytes, used)",
                  ram_base, app_actual_end, app_actual_size);
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  Stack: 0x%08x - 0x%08x (%d bytes)",
-                 (unsigned int)app->stack_addr, (unsigned int)app->stack_addr + USER_APP_STACK_SIZE, USER_APP_STACK_SIZE);
+                 (unsigned int)app->stack_addr,
+                 (unsigned int)app->stack_addr + app->stack_size,
+                 app->stack_size);
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "=== Precise MPU Regions (Dual Overlapping) ===");
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "  [ALLOW] App Actual: 0x%08x - 0x%08x (RWX)", ram_base, app_actual_end);
     if (region_size >= 1024) {
@@ -451,7 +481,7 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
         
         kernel_reloc(got_base, (unsigned int)flash_addr,
                      header->got_start, header->got_end, header->text_start,
-                     header->data_start, header->stack_addr + USER_APP_STACK_SIZE,
+                     header->data_start, header->stack_addr + header->stack_size,
                      ram_base,
                      rel_start, rel_end);
 
@@ -527,8 +557,8 @@ static void* user_app_thread(void* arg) {
         }
     }
 
-    if (app->entry_arg != NULL) {
-        uint32_t arg_end = (uint32_t)app->entry_arg + 256;
+    if (app->entry_arg != NULL && app->arg_size > 0) {
+        uint32_t arg_end = (uint32_t)app->entry_arg + app->arg_size;
         if (arg_end > protected_end) {
             protected_end = arg_end;
         }
@@ -572,10 +602,10 @@ int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out) {
     
     PUP_LOG_INFO(PUP_LOG_MODULE_APP, "Running user app at 0x%08x", (unsigned int)app->entry);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Using app stack: addr=0x%08x, size=%d", 
-               (unsigned int)app->stack_addr, USER_APP_STACK_SIZE);
+               (unsigned int)app->stack_addr, app->stack_size);
     
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, USER_APP_STACK_SIZE);
+    pthread_attr_setstacksize(&attr, app->stack_size);
     pthread_attr_setstackaddr(&attr, app->stack_addr);
     pthread_attr_setname(&attr, (char *)(thread_name ? thread_name : "user_app"));
     pthread_attr_setuser(&attr, 1);

@@ -2,6 +2,7 @@
 #define __APP_HEADER_H__
 
 #define USER_APP_STACK_SIZE 0x2000
+#define USER_APP_ARG_AREA_SIZE 0x100
 
 typedef struct {
     unsigned int magic;
@@ -10,6 +11,9 @@ typedef struct {
     unsigned int app_size;
     unsigned int version;
     unsigned int stack_addr;
+    unsigned int stack_size;
+    unsigned int arg_start;
+    unsigned int arg_end;
     unsigned int got_start;
     unsigned int got_end;
     unsigned int text_start;

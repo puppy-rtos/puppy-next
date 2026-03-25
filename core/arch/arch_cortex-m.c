@@ -394,6 +394,31 @@ void arch_hardfault_exception(struct exception_info* exception_info) {
 #define SCB_CFSR_MEMFAULTSR_Pos    0U
 #define SCB_CFSR_MEMFAULTSR_Msk    (0xFFUL << SCB_CFSR_MEMFAULTSR_Pos)
 
+static const char* arch_fault_addr_classify(pup_uint32_t addr, app_process_t* app)
+{
+    if (addr >= PUP_KERNEL_RAM_BASE && addr < (PUP_KERNEL_RAM_BASE + PUP_KERNEL_RAM_SIZE)) {
+        return "kernel_ram";
+    }
+
+    if (addr >= PUP_SHARED_RAM_BASE && addr < (PUP_SHARED_RAM_BASE + PUP_SHARED_RAM_SIZE)) {
+        return "shared_ram";
+    }
+
+    if (app) {
+        pup_uint32_t app_start = app->memory_base;
+        pup_uint32_t app_end = app->memory_base + app->memory_size;
+        if (addr >= app_start && addr < app_end) {
+            return "current_app_ram";
+        }
+    }
+
+    if (addr >= PUP_APP_RAM_BASE && addr < (PUP_APP_RAM_BASE + PUP_APP_RAM_SIZE)) {
+        return "other_app_or_unmapped_user_ram";
+    }
+
+    return "outside_known_ram";
+}
+
 void arch_memmanage_exception(struct exception_info* exception_info) {
     struct stack_frame* context = &exception_info->stack_frame;
     pup_uint32_t cfsr = SCB_EXT->CFSR;
@@ -413,9 +438,23 @@ void arch_memmanage_exception(struct exception_info* exception_info) {
     
     PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "CFSR: 0x%08x", cfsr);
     PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "MMFAR: 0x%08x", mmfar);
+
+    if (app) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH,
+                      "Active app: %s (pid=%d) range=[0x%08x,0x%08x)",
+                      app->name,
+                      app->pid,
+                      app->memory_base,
+                      app->memory_base + app->memory_size);
+    } else {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "Active app: none");
+    }
     
     if (cfsr & (1 << 7)) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "MMARVALID: MMFAR contains valid fault address");
+        PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH,
+                      "Fault address class: %s",
+                      arch_fault_addr_classify(mmfar, app));
     }
     if (cfsr & (1 << 5)) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "MLSPERR: MemManage fault on floating-point lazy state preservation");

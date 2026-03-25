@@ -134,6 +134,17 @@ def run_default_sequence(runner: QemuCmdRunner) -> int:
             ],
             "timeout": 10.0,
         },
+        {
+            "name": "violate start",
+            "command": "/rom/mpu_test violate_start",
+            "expects": [
+                "[mpu_test] Violate start boundary",
+                "MPU Memory Management Fault",
+                "User application memory fault, terminating",
+                PROMPT,
+            ],
+            "timeout": 10.0,
+        },
     ]
 
     for step in steps:

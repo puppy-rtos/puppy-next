@@ -345,6 +345,10 @@ void pup_sched_swap_done_cb(void) {
                                   next_app->pid,
                                   next_app->mpu_cached_version);
                 } else {
+                    PUP_LOG_DEBUG(PUP_LOG_MODULE_MPU,
+                                  "Applied cached MPU profile: pid=%d ver=%u",
+                                  next_app->pid,
+                                  next_app->mpu_cached_version);
                     _g_active_mpu_pid = next_app->pid;
                     _g_active_mpu_cache_version = next_app->mpu_cached_version;
                 }

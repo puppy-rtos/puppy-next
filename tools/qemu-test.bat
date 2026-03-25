@@ -5,13 +5,17 @@ pushd "%SCRIPT_DIR%.."
 echo Starting QEMU test...
 echo.
 
-start "" /b D:\RT-ThreadStudio\repo\Extract\Debugger_Support_Packages\RealThread\QEMU\4.2.0.4\qemu-system-arm.exe -M stm32f407-atk-explorer -kernel output/firmware.bin -serial stdio -nographic
+if not exist "output\firmware.bin" (
+	echo ERROR: output\firmware.bin not found. Build firmware first.
+	popd
+	exit /b 1
+)
 
-timeout /t 6 /nobreak >nul
-
-taskkill /F /IM qemu-system-arm.exe >nul 2>&1
+d:/Scoop/apps/python/3.13.7/python.exe tools/qemu_cmd_runner.py
+set TEST_EXIT=%ERRORLEVEL%
 
 echo.
 echo Test finished.
 
 popd
+exit /b %TEST_EXIT%

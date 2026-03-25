@@ -30,6 +30,7 @@
 在项目根目录执行:
 
 ```powershell
+./prebuild-clean.bat
 xmake f -p cross -a cortex-m4 -m debug
 xmake
 xmake build firmware
@@ -40,6 +41,7 @@ xmake build firmware
 
 - 根目录 `qemu-run.bat` 会转发到 `tools/qemu-run.bat`。
 - `firmware` 目标会调用 `tools/merge_firmware.py` 将内核与 ROMFS 应用打包为统一镜像。
+- 遇到“`xmake clean` 后仍有旧产物残留、app 启动异常/死机”时，优先执行 `./prebuild-clean.bat` 彻底清理 `.xmake`、`build`、`output` 后再构建。
 
 ### 3.2 典型运行验证
 

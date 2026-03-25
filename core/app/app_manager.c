@@ -9,6 +9,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef ALIGN_UP
+#define ALIGN_UP(size, align)   (((size) + (align) - 1) & ~((align) - 1))
+#endif
+
 static app_process_t* g_app_list = NULL;
 static int next_pid = 1;
 app_process_t* current_app_process = NULL;
@@ -327,10 +331,24 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
     app->stack_addr = (unsigned int)app->image.stack_addr;
     app->entry_addr = (unsigned int)app->image.entry;
     app->got_base = app->image.got_base;
-    app->app_arg_base = app->memory_base + app->memory_size - APP_EXEC_ARG_AREA_SIZE;
     app->got_start = app->image.got_start;
     app->got_end = app->image.got_end;
     app->text_start = app->image.text_start;
+
+    {
+        unsigned int app_runtime_end = app->memory_base + (app->image.compiled_ram_end - app->image.compiled_ram_start);
+        unsigned int got_size = (app->got_end > app->got_start) ? (app->got_end - app->got_start) : 0;
+        unsigned int memory_end = app->memory_base + app->memory_size;
+
+        if (app->got_base != 0 && got_size > 0) {
+            app_runtime_end = app->got_base + got_size;
+        }
+
+        app->app_arg_base = ALIGN_UP(app_runtime_end, 8);
+        if (app->app_arg_base + APP_EXEC_ARG_AREA_SIZE > memory_end) {
+            app->app_arg_base = memory_end - APP_EXEC_ARG_AREA_SIZE;
+        }
+    }
     
     libcm_memset((void*)app->app_arg_base, 0, APP_EXEC_ARG_AREA_SIZE);
     if (arg) {

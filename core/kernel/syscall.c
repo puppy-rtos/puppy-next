@@ -486,6 +486,46 @@ static long sys_shared_memalign(long arg1, long arg2, long arg3, long arg4) {
     return (long)ptr;
 }
 
+static int sys_user_writable_range_valid(app_process_t* app, const void* ptr, unsigned int size) {
+    unsigned int app_start;
+    unsigned int app_end;
+    unsigned int ptr_start;
+    unsigned int ptr_end;
+
+    if (!app || !ptr || size == 0) {
+        return 0;
+    }
+
+    app_start = app->memory_base;
+    app_end = app->memory_base + app->memory_size;
+    ptr_start = (unsigned int)ptr;
+    ptr_end = ptr_start + size;
+
+    if (app_end < app_start || ptr_end < ptr_start) {
+        return 0;
+    }
+
+    return (ptr_start >= app_start) && (ptr_end <= app_end);
+}
+
+static long sys_app_ram_range(long arg1, long arg2, long arg3, long arg4) {
+    pup_app_ram_range_t* range = (pup_app_ram_range_t*)arg1;
+    app_process_t* app = app_get_current();
+
+    if (!range || !app) {
+        return -1;
+    }
+
+    if (!sys_user_writable_range_valid(app, range, sizeof(*range))) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_app_ram_range: invalid user buffer 0x%08x", (unsigned int)range);
+        return -1;
+    }
+
+    range->ram_start = app->memory_base;
+    range->ram_end = app->memory_base + app->memory_size;
+    return 0;
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -512,6 +552,7 @@ static const syscall_func_t syscall_table[] = {
     [SYS_SHARED_MALLOC] = sys_shared_malloc,
     [SYS_SHARED_FREE] = sys_shared_free,
     [SYS_SHARED_MEMALIGN] = sys_shared_memalign,
+    [SYS_APP_RAM_RANGE] = sys_app_ram_range,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

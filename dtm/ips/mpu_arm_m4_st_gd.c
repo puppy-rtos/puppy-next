@@ -244,24 +244,27 @@ int dtm_mpu_setup_user_protection(void) {
     return 0;
 }
 
-/* Calculate minimum subregion alignment size for MPU
- * MPU region size must be power of 2, minimum 32 bytes
- * Subregion size = region_size / 8
- * This function returns the minimum subregion size that can cover the app
- */
-static uint32_t dtm_mpu_calc_min_subregion_size(uint32_t app_size)
+static uint32_t dtm_mpu_choose_region_size(uint32_t app_base, uint32_t app_size)
 {
-    uint32_t subregion_size = 32;  /* Minimum 32 bytes */
-    
-    /* Find the smallest subregion size that can cover the app
-     * Region size = subregion_size * 8, must be >= app_size + alignment margin
-     */
-    while (subregion_size * 8 < app_size + subregion_size * 8) {
-        subregion_size <<= 1;
-        if (subregion_size >= 4096) break;  /* Max 4KB subregions (32KB region) */
+    uint32_t region_size = 256;
+    uint32_t app_end = app_base + app_size;
+
+    if (app_size == 0 || app_end < app_base) {
+        return 256;
     }
-    
-    return subregion_size;
+
+    while (region_size <= (1024U * 1024U)) {
+        uint32_t front_base = app_base & ~(region_size - 1U);
+        unsigned long long coverage_end = (unsigned long long)front_base + ((unsigned long long)region_size * 2ULL);
+
+        if ((unsigned long long)app_end <= coverage_end) {
+            return region_size;
+        }
+
+        region_size <<= 1U;
+    }
+
+    return 1024U * 1024U;
 }
 
 /* Configure MPU region with sub-region masking
@@ -282,57 +285,37 @@ static void dtm_mpu_config_precise_region(uint32_t app_base, uint32_t app_size,
 {
     uint32_t subregion_size;
     uint32_t f_sub = 0, b_sub = 0;
-    uint32_t app_end = app_base + app_size;  /* Actual end, NOT aligned */
+    uint32_t app_end = app_base + app_size;
     int i;
 
-    /* Use fixed 32KB region size (4KB sub-regions) for good granularity
-     * This gives us 4KB alignment requirement for app_base
-     */
-    *region_size = 32768;  /* 32KB */
-    subregion_size = 4096; /* 4KB sub-regions */
+    *region_size = dtm_mpu_choose_region_size(app_base, app_size);
+    subregion_size = *region_size / DTM_MPU_SUB_REGION_CNT;
 
-    /* Front region: aligned to 32KB boundary, covers app start */
     *f_base = app_base & ~(*region_size - 1);
-    
-    /* Calculate front sub-region mask
-     * Enable sub-regions that overlap with [app_base, app_end)
-     * Disable sub-regions completely outside this range */
+
     for (i = 0; i < 8; i++) {
         uint32_t subregion_start = *f_base + i * subregion_size;
         uint32_t subregion_end = subregion_start + subregion_size;
-        
-        /* Enable only if sub-region overlaps with [app_base, app_end)
-         * Overlap condition: subregion_start < app_end AND subregion_end > app_base */
         int overlaps = (subregion_start < app_end) && (subregion_end > app_base);
         if (!overlaps) {
-            f_sub |= (1 << i);  /* Disable this sub-region */
+            f_sub |= (1U << i);
         }
     }
 
-    /* Back region: can overlap with front region
-     * We place it to cover app_end precisely
-     * Strategy: align app_end down to 32KB boundary for back region base
-     * This allows overlap and ensures app_end is covered */
-    *b_base = app_end & ~(*region_size - 1);
-    
-    /* If b_base is the same as f_base, shift it to create overlap coverage */
+    *b_base = (app_end - 1U) & ~(*region_size - 1U);
+
     if (*b_base == *f_base) {
-        /* App fits within one 32KB region, but we use two overlapping regions
-         * Back region starts at middle to extend coverage */
-        *b_base = *f_base + subregion_size * 4;  /* 16KB offset, creates overlap */
+        *f_sub_mask = f_sub;
+        *b_sub_mask = 0xFFU;
+        return;
     }
-    
-    /* Calculate back sub-region mask
-     * Enable sub-regions that overlap with [app_base, app_end)
-     * Disable sub-regions completely outside this range */
+
     for (i = 0; i < 8; i++) {
         uint32_t subregion_start = *b_base + i * subregion_size;
         uint32_t subregion_end = subregion_start + subregion_size;
-        
-        /* Enable only if sub-region overlaps with [app_base, app_end) */
         int overlaps = (subregion_start < app_end) && (subregion_end > app_base);
         if (!overlaps) {
-            b_sub |= (1 << i);  /* Disable this sub-region */
+            b_sub |= (1U << i);
         }
     }
 

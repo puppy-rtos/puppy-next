@@ -3,6 +3,7 @@
 
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
+#include "shared/pup_app_memory.h"
 #include "shared/pup_user_thread.h"
 
 #define STDIN_FILENO    0
@@ -36,6 +37,7 @@
 #define SYS_SHARED_MALLOC    23
 #define SYS_SHARED_FREE      24
 #define SYS_SHARED_MEMALIGN  25
+#define SYS_APP_RAM_RANGE    26
 
 long syscall(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 
@@ -158,6 +160,10 @@ static inline void shared_free(void* ptr) {
 
 static inline void* shared_memalign(size_t align, size_t size) {
     return (void*)syscall(SYS_SHARED_MEMALIGN, align, size, 0, 0);
+}
+
+static inline int app_get_ram_range(pup_app_ram_range_t* range) {
+    return (int)syscall(SYS_APP_RAM_RANGE, (long)range, 0, 0, 0);
 }
 
 #endif

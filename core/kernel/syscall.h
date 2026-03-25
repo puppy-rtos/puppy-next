@@ -4,6 +4,7 @@
 #include <puppy_core.h>
 #include "shared/pup_heap_info.h"
 #include "shared/pup_ipc.h"
+#include "shared/pup_app_memory.h"
 
 #define SYS_FD_STDIN   0
 #define SYS_FD_STDOUT  1
@@ -36,6 +37,7 @@
 #define SYS_SHARED_MALLOC    23
 #define SYS_SHARED_FREE      24
 #define SYS_SHARED_MEMALIGN  25
+#define SYS_APP_RAM_RANGE    26
 
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 

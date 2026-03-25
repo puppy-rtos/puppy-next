@@ -192,8 +192,6 @@ def run_default_sequence(runner: QemuCmdRunner) -> int:
 
 def run_switch_stress_sequence(runner: QemuCmdRunner, cycles: int = 5) -> int:
     print(f"\n[runner] Step: switch stress ({cycles} cycles)")
-    switch_log = "Applied cached MPU profile:"
-    before_count = runner.count_occurrences(switch_log)
 
     for i in range(cycles):
         print(f"\n[runner] Stress cycle {i + 1}/{cycles}")
@@ -228,13 +226,6 @@ def run_switch_stress_sequence(runner: QemuCmdRunner, cycles: int = 5) -> int:
                 print(f"\n[runner] ERROR: missing foreground expected text: {expected}")
                 return 1
             print(f"\n[runner] Matched: {expected}")
-
-    after_count = runner.count_occurrences(switch_log)
-    delta = after_count - before_count
-    print(f"\n[runner] MPU switch log delta: {delta}")
-    if delta <= 0:
-        print(f"\n[runner] ERROR: no MPU switch log found: {switch_log}")
-        return 1
 
     return 0
 

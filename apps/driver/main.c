@@ -240,9 +240,6 @@ static void gpio_handle_pulse(const pup_channel_msg_t* msg)
     }
 
     state = gpio_read_level(key_dev);
-    printf("[driver] key0 irq: state=%d (%s)\n",
-           state,
-           state ? "released" : "pressed");
 }
 
 static void gpio_service_loop(void)

@@ -5,36 +5,36 @@
 
 /* MPU and SCB register structures */
 typedef struct {
-    uint32_t TYPE;
-    uint32_t CTRL;
-    uint32_t RNR;
-    uint32_t RBAR;
-    uint32_t RASR;
-    uint32_t RBAR_A1;
-    uint32_t RASR_A1;
-    uint32_t RBAR_A2;
-    uint32_t RASR_A2;
-    uint32_t RBAR_A3;
-    uint32_t RASR_A3;
+    volatile uint32_t TYPE;
+    volatile uint32_t CTRL;
+    volatile uint32_t RNR;
+    volatile uint32_t RBAR;
+    volatile uint32_t RASR;
+    volatile uint32_t RBAR_A1;
+    volatile uint32_t RASR_A1;
+    volatile uint32_t RBAR_A2;
+    volatile uint32_t RASR_A2;
+    volatile uint32_t RBAR_A3;
+    volatile uint32_t RASR_A3;
 } DTM_MPU_Type;
 
 typedef struct {
-    uint32_t CPUID;
-    uint32_t ICSR;
-    uint32_t VTOR;
-    uint32_t AIRCR;
-    uint32_t SCR;
-    uint32_t CCR;
-    uint32_t SHPR[3];
-    uint32_t SHCSR;
-    uint32_t CFSR;
-    uint32_t MMSR;
-    uint32_t BFSR;
-    uint32_t UFSR;
-    uint32_t HFSR;
-    uint32_t MMAR;
-    uint32_t BFAR;
-    uint32_t AFSR;
+    volatile uint32_t CPUID;
+    volatile uint32_t ICSR;
+    volatile uint32_t VTOR;
+    volatile uint32_t AIRCR;
+    volatile uint32_t SCR;
+    volatile uint32_t CCR;
+    volatile uint32_t SHPR[3];
+    volatile uint32_t SHCSR;
+    volatile uint32_t CFSR;
+    volatile uint32_t MMSR;
+    volatile uint32_t BFSR;
+    volatile uint32_t UFSR;
+    volatile uint32_t HFSR;
+    volatile uint32_t MMAR;
+    volatile uint32_t BFAR;
+    volatile uint32_t AFSR;
 } DTM_SCB_Type;
 
 #define DTM_MPU_BASE        0xE000ED90UL

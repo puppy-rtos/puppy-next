@@ -52,6 +52,7 @@
 #define SYS_CHANNEL_CALL     34
 #define SYS_CHANNEL_RECEIVE  35
 #define SYS_CHANNEL_REPLY    36
+#define SYS_IRQ_CONTROL      37
 
 /* STM32F407 NVIC external IRQ numbers used by user-mode drivers */
 #define PUP_IRQ_EXTI9_5      23
@@ -201,6 +202,15 @@ static inline int irq_unsubscribe(int handle) {
 
 static inline int irq_wait(int handle, int timeout_ticks) {
     return (int)syscall(SYS_IRQ_WAIT, handle, timeout_ticks, 0, 0);
+}
+
+/* IRQ control commands */
+#define IRQ_CONTROL_ENABLE       1
+#define IRQ_CONTROL_DISABLE      2
+#define IRQ_CONTROL_SET_PRIORITY 3
+
+static inline int irq_control(unsigned int irq_num, int cmd, int value) {
+    return (int)syscall(SYS_IRQ_CONTROL, (long)irq_num, (long)cmd, (long)value, 0);
 }
 
 /* ---------- Channel + Pulse IPC ----------------------------------------

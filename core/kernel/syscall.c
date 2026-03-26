@@ -12,6 +12,7 @@
 #include "pup_sem.h"
 #include "shared/pup_user_thread.h"
 #include "stack_guard.h"
+#include "dev_irq.h"
 
 void syscall_uart_rx_init(void)
 {
@@ -19,7 +20,6 @@ void syscall_uart_rx_init(void)
 }
 
 #define MAX_USER_THREADS  4
-#define MAX_USER_IRQ_SUBSCRIPTIONS 8
 
 typedef struct {
     pthread_t thread;
@@ -34,16 +34,6 @@ typedef struct {
 } user_thread_t;
 
 static user_thread_t user_threads[MAX_USER_THREADS];
-
-typedef struct {
-    int used;
-    int owner_pid;
-    pup_user_irq_subscription_t subscription;
-    unsigned int pending_count;
-    int channel_id;   /* channel to deliver IRQ pulses; -1 = legacy irq_wait mode */
-} user_irq_subscription_entry_t;
-
-static user_irq_subscription_entry_t g_user_irq_subscriptions[MAX_USER_IRQ_SUBSCRIPTIONS];
 
 static void sys_exit_no_return(void) __attribute__((noreturn));
 static void sys_stack_guard_terminate_current_thread(const char* stage) __attribute__((noreturn));
@@ -605,7 +595,6 @@ static long sys_devfs_unregister(long arg1, long arg2, long arg3, long arg4) {
 static long sys_irq_subscribe(long arg1, long arg2, long arg3, long arg4) {
     const pup_user_irq_subscription_t* subscription = (const pup_user_irq_subscription_t*)arg1;
     app_process_t* app = app_get_current();
-    int i;
 
     if (!app || !subscription) {
         return -1;
@@ -624,100 +613,58 @@ static long sys_irq_subscribe(long arg1, long arg2, long arg3, long arg4) {
         return -1;
     }
 
-    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
-        if (!g_user_irq_subscriptions[i].used) {
-            g_user_irq_subscriptions[i].used = 1;
-            g_user_irq_subscriptions[i].owner_pid = app->pid;
-            g_user_irq_subscriptions[i].subscription = *subscription;
-            g_user_irq_subscriptions[i].pending_count = 0;
-            g_user_irq_subscriptions[i].channel_id = subscription->channel_id;
-            PUP_LOG_INFO(PUP_LOG_MODULE_SYSCALL,
-                         "sys_irq_subscribe: pid=%d irq=%u handle=%d",
-                         app->pid,
-                         subscription->irq_num,
-                         i);
-            return i;
-        }
-    }
-
-    return -1;
+    return dev_irq_subscribe(subscription, app->pid);
 }
 
 static long sys_irq_unsubscribe(long arg1, long arg2, long arg3, long arg4) {
     int handle = (int)arg1;
     app_process_t* app = app_get_current();
 
-    if (!app || handle < 0 || handle >= MAX_USER_IRQ_SUBSCRIPTIONS) {
+    (void)arg2;
+    (void)arg3;
+    (void)arg4;
+
+    if (!app) {
         return -1;
     }
 
-    if (!g_user_irq_subscriptions[handle].used ||
-        g_user_irq_subscriptions[handle].owner_pid != app->pid) {
-        return -1;
-    }
-
-    libcm_memset(&g_user_irq_subscriptions[handle], 0, sizeof(g_user_irq_subscriptions[handle]));
-    return 0;
+    return dev_irq_unsubscribe(handle, app->pid);
 }
 
 static long sys_irq_wait(long arg1, long arg2, long arg3, long arg4) {
     int handle = (int)arg1;
     int timeout_ticks = (int)arg2;
     app_process_t* app = app_get_current();
-    user_irq_subscription_entry_t* entry;
 
-    if (!app || handle < 0 || handle >= MAX_USER_IRQ_SUBSCRIPTIONS) {
+    (void)arg3;
+    (void)arg4;
+
+    if (!app) {
         return -1;
     }
 
-    entry = &g_user_irq_subscriptions[handle];
-    if (!entry->used || entry->owner_pid != app->pid) {
-        return -1;
-    }
-
-    if (entry->pending_count > 0U) {
-        entry->pending_count--;
-        return 1;
-    }
-
-    if (timeout_ticks > 0) {
-        pthread_delay(timeout_ticks);
-    }
-
-    return 0;
+    return dev_irq_wait(handle, app->pid, timeout_ticks);
 }
 
-void syscall_irq_notify(unsigned int irq_num)
+static long sys_irq_control(long arg1, long arg2, long arg3, long arg4)
 {
-    int i;
+    unsigned int irq_num = (unsigned int)arg1;
+    int cmd = (int)arg2;
+    int value = (int)arg3;
+    app_process_t* app = app_get_current();
 
-    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
-        user_irq_subscription_entry_t *entry = &g_user_irq_subscriptions[i];
+    (void)arg4;
 
-        if (!entry->used || entry->subscription.irq_num != irq_num) {
-            continue;
-        }
-
-        if (entry->channel_id >= 0 && pup_channel_is_valid(entry->channel_id)) {
-            /* Preferred path: IRQ event as channel pulse. */
-            if (pup_channel_notify(entry->channel_id, (int)irq_num, 0) == 0) {
-                continue;
-            }
-        }
-
-        /* Fallback path for legacy irq_wait() mode or pulse queue full. */
-        entry->pending_count++;
+    if (!app) {
+        return -1;
     }
+
+    return dev_irq_control(irq_num, cmd, value, app->pid);
 }
 
-void syscall_cleanup_owner_resources(int owner_pid) {
-    int i;
-
-    for (i = 0; i < MAX_USER_IRQ_SUBSCRIPTIONS; i++) {
-        if (g_user_irq_subscriptions[i].used && g_user_irq_subscriptions[i].owner_pid == owner_pid) {
-            libcm_memset(&g_user_irq_subscriptions[i], 0, sizeof(g_user_irq_subscriptions[i]));
-        }
-    }
+void syscall_cleanup_owner_resources(int owner_pid)
+{
+    dev_irq_cleanup_owner(owner_pid);
 }
 
 /* -----------------------------------------------------------------------
@@ -835,6 +782,7 @@ static const syscall_func_t syscall_table[] = {
     [SYS_IRQ_SUBSCRIBE] = sys_irq_subscribe,
     [SYS_IRQ_UNSUBSCRIBE] = sys_irq_unsubscribe,
     [SYS_IRQ_WAIT] = sys_irq_wait,
+    [SYS_IRQ_CONTROL] = sys_irq_control,
     [SYS_CHANNEL_CREATE]  = sys_channel_create,
     [SYS_CHANNEL_DESTROY] = sys_channel_destroy,
     [SYS_CHANNEL_CALL]    = sys_channel_call,

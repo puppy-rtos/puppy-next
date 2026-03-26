@@ -8,6 +8,7 @@
 #include "shared/pup_driver_abi.h"
 #include "shared/pup_channel_abi.h"
 #include "pup_channel.h"
+#include "dev_irq.h"
 
 #define SYS_FD_STDIN   0
 #define SYS_FD_STDOUT  1
@@ -53,12 +54,16 @@
 #define SYS_CHANNEL_RECEIVE  35
 #define SYS_CHANNEL_REPLY    36
 
+#define SYS_IRQ_CONTROL      37
+
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 
 long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg4);
 void syscall_uart_rx_init(void);
 void syscall_cleanup_owner_resources(int owner_pid);
-void syscall_irq_notify(unsigned int irq_num);
+
+/* syscall_irq_notify is provided by dev_irq.h/dev_irq.c */
+#define syscall_irq_notify dev_irq_notify
 
 static inline long syscall_write(int fd, const char* buf, long len) {
     return syscall_handler(SYS_WRITE, fd, (long)buf, len, 0);

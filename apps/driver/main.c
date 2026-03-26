@@ -311,6 +311,63 @@ static int gpio_register_one(gpio_user_dev_t* dev)
     return 0;
 }
 
+// 硬件寄存器定义 - 这些寄存器在用户态可以访问
+#define RCC_BASE_ADDR             0x40023800UL
+#define SYSCFG_BASE_ADDR          0x40013800UL
+#define EXTI_BASE_ADDR            0x40013C00UL
+#define RCC_APB2ENR_OFFSET        0x44UL
+#define RCC_AHB1ENR_OFFSET        0x30UL
+#define RCC_APB2ENR_SYSCFGEN_BIT  (1U << 14)
+#define RCC_AHB1ENR_GPIOAEN_BIT   (1U << 0)
+#define RCC_AHB1ENR_GPIOCEN_BIT   (1U << 2)
+#define RCC_AHB1ENR_GPIOFEN_BIT   (1U << 5)
+
+#define GPIO_KEY0_EXTI_LINE_BIT   (1U << 5)
+
+// 寄存器结构体
+typedef struct {
+    volatile uint32_t MEMRMP;
+    volatile uint32_t PMC;
+    volatile uint32_t EXTICR[4];
+} pup_syscfg_regs_t;
+
+typedef struct {
+    volatile uint32_t IMR;
+    volatile uint32_t EMR;
+    volatile uint32_t RTSR;
+    volatile uint32_t FTSR;
+    volatile uint32_t SWIER;
+    volatile uint32_t PR;
+} pup_exti_regs_t;
+
+static void gpio_irq_config(void)
+{
+    volatile uint32_t *apb2enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_APB2ENR_OFFSET);
+    volatile uint32_t *ahb1enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_AHB1ENR_OFFSET);
+    pup_syscfg_regs_t *syscfg = (pup_syscfg_regs_t *)SYSCFG_BASE_ADDR;
+    pup_exti_regs_t *exti = (pup_exti_regs_t *)EXTI_BASE_ADDR;
+
+    /* Enable SYSCFG clock so EXTICR mapping is writable. */
+    *apb2enr |= RCC_APB2ENR_SYSCFGEN_BIT;
+    *ahb1enr |= (RCC_AHB1ENR_GPIOAEN_BIT | RCC_AHB1ENR_GPIOCEN_BIT | RCC_AHB1ENR_GPIOFEN_BIT);
+
+    /* Route EXTI line 5 to port C (0x2). EXTICR2 bits [7:4]. */
+    syscfg->EXTICR[1] &= ~(0xFU << 4);
+    syscfg->EXTICR[1] |= (0x2U << 4);
+
+    /* Unmask line 5 and trigger on both edges to catch press/release. */
+    exti->IMR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->RTSR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->FTSR |= GPIO_KEY0_EXTI_LINE_BIT;
+    exti->PR = GPIO_KEY0_EXTI_LINE_BIT;
+
+    /* 使用系统调用配置 NVIC 中断 */
+    irq_control(PUP_IRQ_EXTI9_5, IRQ_CONTROL_SET_PRIORITY, 2);
+    irq_control(PUP_IRQ_EXTI9_5, IRQ_CONTROL_ENABLE, 0);
+
+    printf("[driver] GPIO IRQ configured: EXTI line5 -> irq=%u\n", (unsigned int)PUP_IRQ_EXTI9_5);
+}
+
 void app_main(const char* arg)
 {
     int i;
@@ -318,6 +375,9 @@ void app_main(const char* arg)
     (void)arg;
 
     printf("[driver] start\n");
+
+    // 配置GPIO中断
+    gpio_irq_config();
 
     g_server_channel = pup_channel_create();
     if (g_server_channel < 0) {

@@ -49,9 +49,9 @@
 
 #define SYS_CHANNEL_CREATE   32
 #define SYS_CHANNEL_DESTROY  33
-#define SYS_MSG_SEND         34
-#define SYS_MSG_RECEIVE      35
-#define SYS_MSG_REPLY        36
+#define SYS_CHANNEL_CALL     34
+#define SYS_CHANNEL_RECEIVE  35
+#define SYS_CHANNEL_REPLY    36
 
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 

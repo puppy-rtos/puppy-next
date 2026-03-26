@@ -272,7 +272,7 @@ int pup_channel_reply(int channel_id, int cookie, long result)
     return 0;
 }
 
-int pup_channel_post_pulse(int channel_id, int code, int value)
+int pup_channel_notify(int channel_id, int code, int value)
 {
     pup_channel_t *ch;
     pup_base_t     key;

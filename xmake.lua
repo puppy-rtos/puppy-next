@@ -109,7 +109,7 @@ end
 
 define_user_app_target("hello", "apps/hello/main.c", "hello.bin")
 define_user_app_target("shell", "apps/shell/main.c", "shell.bin", "0x1000")
-define_user_app_target("test", "apps/test/main.c", "test.bin")
+define_user_app_target("test", "apps/test/main.c", "test.bin", "0x1000")
 define_user_app_target("mpu_test", "apps/mpu_test/main.c", "mpu_test.bin", "0x1000")
 define_user_app_target("driver", "apps/driver/main.c", "driver.bin", "0x1000")
 

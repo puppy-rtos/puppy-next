@@ -31,20 +31,61 @@ static volatile int delay_thread_done;
 static volatile int stack_guard_thread_returned;
 static volatile unsigned int stack_guard_sink;
 
-static char pth1_stack[4096];
-static char pth2_stack[4096];
-static char delay_thread_stack[4096];
-static char sem_waiter_stack[2048];
-static char stack_guard_thread_stack[768];
+static char pth1_stack[2048];
+static char pth2_stack[2048];
+static char delay_thread_stack[2048];
+static char sem_waiter_stack[1024];
+static char stack_guard_thread_stack[512];
 
 static volatile int sem_waiter_done;
 static int sem_test_handle = -1;
+static char channel_server_stack[2048];
 
 #define STACK_GUARD_RECURSION_DEPTH 7
 #define STACK_GUARD_FRAME_BYTES     96
 
 static void print_usage(void);
 static int run_named_test(const char *name);
+
+typedef struct {
+    int channel_id;
+    int rounds;
+} channel_pingpong_ctx_t;
+
+typedef struct {
+    int seq;
+    int value;
+} channel_pingpong_payload_t;
+
+static void *channel_server_thread(void *arg)
+{
+    channel_pingpong_ctx_t *ctx = (channel_pingpong_ctx_t *)arg;
+
+    if (!ctx || ctx->channel_id < 0 || ctx->rounds <= 0) {
+        return NULL;
+    }
+
+    for (int i = 0; i < ctx->rounds; i++) {
+        pup_channel_msg_t msg;
+        int cookie = pup_channel_receive(ctx->channel_id, &msg);
+
+        if (cookie <= 0 || msg.type != PUP_MSG_TYPE_REQUEST || msg.buf == 0 ||
+            msg.buf_sz < (int)sizeof(channel_pingpong_payload_t)) {
+            if (cookie > 0) {
+                pup_channel_reply(ctx->channel_id, cookie, -1);
+            }
+            return NULL;
+        }
+
+        {
+            channel_pingpong_payload_t *payload = (channel_pingpong_payload_t *)msg.buf;
+            payload->value += 1;
+            pup_channel_reply(ctx->channel_id, cookie, payload->value);
+        }
+    }
+
+    return NULL;
+}
 
 static void *sem_waiter_thread(void *arg)
 {
@@ -373,7 +414,7 @@ static int test_mpu_boundary(void)
 /* ==================== MPU Boundary Violation Tests (with separate threads) ==================== */
 
 static volatile int mpu_boundary_violation_thread_returned;
-static char mpu_boundary_violation_stack[1024];
+static char mpu_boundary_violation_stack[512];
 
 static void *mpu_before_app_ram_thread(void *arg)
 {
@@ -489,8 +530,8 @@ static int test_mpu_after_app_ram(void)
 static volatile int mpu_violation_thread_returned;
 static volatile unsigned int mpu_violation_sink;
 
-static char mpu_kernel_violation_stack[1024];
-static char mpu_flash_violation_stack[1024];
+static char mpu_kernel_violation_stack[512];
+static char mpu_flash_violation_stack[512];
 
 static void *mpu_kernel_violation_thread(void *arg)
 {
@@ -866,6 +907,72 @@ static int test_sem(void)
     return 0;
 }
 
+static int test_channel_pingpong(void)
+{
+    const int rounds = 16;
+    int channel_id;
+    pthread_t thread;
+    pthread_attr_t attr;
+    channel_pingpong_ctx_t ctx;
+    channel_pingpong_payload_t *payload;
+
+    printf("\n=== Channel Ping-Pong Test ===\n");
+
+    channel_id = pup_channel_create();
+    if (channel_id < 0) {
+        printf("[channel] pup_channel_create failed\n");
+        return -1;
+    }
+
+    payload = (channel_pingpong_payload_t *)shared_malloc(sizeof(channel_pingpong_payload_t));
+    if (!payload) {
+        printf("[channel] shared_malloc payload failed\n");
+        pup_channel_destroy(channel_id);
+        return -1;
+    }
+
+    ctx.channel_id = channel_id;
+    ctx.rounds = rounds;
+
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, sizeof(channel_server_stack));
+    pthread_attr_setstackaddr(&attr, channel_server_stack);
+    pthread_attr_setname(&attr, "chan_srv");
+
+    if (pthread_create(&thread, &attr, channel_server_thread, &ctx) != 0) {
+        printf("[channel] create server thread failed\n");
+        shared_free(payload);
+        pup_channel_destroy(channel_id);
+        return -1;
+    }
+
+    for (int i = 0; i < rounds; i++) {
+        long reply;
+
+        payload->seq = i;
+        payload->value = i;
+        reply = pup_channel_call(channel_id, payload, sizeof(*payload));
+
+        if (reply != (long)(i + 1) || payload->value != i + 1) {
+            printf("[channel] round=%d failed: reply=%ld payload=%d\n",
+                   i,
+                   reply,
+                   payload->value);
+            pthread_join(thread, NULL);
+            shared_free(payload);
+            pup_channel_destroy(channel_id);
+            return -1;
+        }
+    }
+
+    pthread_join(thread, NULL);
+    shared_free(payload);
+    pup_channel_destroy(channel_id);
+
+    printf("[channel] ping-pong %d rounds passed\n", rounds);
+    return 0;
+}
+
 static int test_spi_flash_id(void)
 {
     int fd;
@@ -1107,6 +1214,7 @@ static const test_cmd_t test_cmds[] = {
     {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
     {"key", "Read PC5 key0 status for 5 seconds", test_key0},
     {"sem", "Test named semaphore wait/post/close", test_sem},
+    {"channel", "Test pup_channel_call/pup_channel_receive ping-pong", test_channel_pingpong},
     {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},
     {"shm", "Test shared heap memory allocation and free", test_shared_heap},
     {"driver", "Test user-mode gpio driver open/ioctl/read chain", test_driver_chain},

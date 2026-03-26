@@ -700,7 +700,7 @@ void syscall_irq_notify(unsigned int irq_num)
 
         if (entry->channel_id >= 0 && pup_channel_is_valid(entry->channel_id)) {
             /* Preferred path: IRQ event as channel pulse. */
-            if (pup_channel_post_pulse(entry->channel_id, (int)irq_num, 0) == 0) {
+            if (pup_channel_notify(entry->channel_id, (int)irq_num, 0) == 0) {
                 continue;
             }
         }
@@ -747,7 +747,7 @@ static long sys_channel_destroy(long arg1, long arg2, long arg3, long arg4)
     return (long)pup_channel_destroy(channel_id);
 }
 
-static long sys_msg_send(long arg1, long arg2, long arg3, long arg4)
+static long sys_channel_call(long arg1, long arg2, long arg3, long arg4)
 {
     int   channel_id = (int)arg1;
     void *buf        = (void *)arg2;
@@ -761,7 +761,7 @@ static long sys_msg_send(long arg1, long arg2, long arg3, long arg4)
     return pup_channel_send(channel_id, buf, buf_sz);
 }
 
-static long sys_msg_receive(long arg1, long arg2, long arg3, long arg4)
+static long sys_channel_receive(long arg1, long arg2, long arg3, long arg4)
 {
     int                channel_id = (int)arg1;
     pup_channel_msg_t *out_msg    = (pup_channel_msg_t *)arg2;
@@ -777,7 +777,7 @@ static long sys_msg_receive(long arg1, long arg2, long arg3, long arg4)
     }
     if (!sys_user_range_valid(app, out_msg, sizeof(*out_msg))) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
-                      "sys_msg_receive: invalid out_msg buffer");
+                      "sys_channel_receive: invalid out_msg buffer");
         return -1;
     }
 
@@ -789,7 +789,7 @@ static long sys_msg_receive(long arg1, long arg2, long arg3, long arg4)
     return (long)cookie;
 }
 
-static long sys_msg_reply(long arg1, long arg2, long arg3, long arg4)
+static long sys_channel_reply(long arg1, long arg2, long arg3, long arg4)
 {
     int  channel_id = (int)arg1;
     int  cookie     = (int)arg2;
@@ -837,9 +837,9 @@ static const syscall_func_t syscall_table[] = {
     [SYS_IRQ_WAIT] = sys_irq_wait,
     [SYS_CHANNEL_CREATE]  = sys_channel_create,
     [SYS_CHANNEL_DESTROY] = sys_channel_destroy,
-    [SYS_MSG_SEND]        = sys_msg_send,
-    [SYS_MSG_RECEIVE]     = sys_msg_receive,
-    [SYS_MSG_REPLY]       = sys_msg_reply,
+    [SYS_CHANNEL_CALL]    = sys_channel_call,
+    [SYS_CHANNEL_RECEIVE] = sys_channel_receive,
+    [SYS_CHANNEL_REPLY]   = sys_channel_reply,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

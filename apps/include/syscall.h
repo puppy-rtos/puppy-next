@@ -49,9 +49,9 @@
 
 #define SYS_CHANNEL_CREATE   32
 #define SYS_CHANNEL_DESTROY  33
-#define SYS_MSG_SEND         34
-#define SYS_MSG_RECEIVE      35
-#define SYS_MSG_REPLY        36
+#define SYS_CHANNEL_CALL     34
+#define SYS_CHANNEL_RECEIVE  35
+#define SYS_CHANNEL_REPLY    36
 
 /* STM32F407 NVIC external IRQ numbers used by user-mode drivers */
 #define PUP_IRQ_EXTI9_5      23
@@ -203,38 +203,53 @@ static inline int irq_wait(int handle, int timeout_ticks) {
     return (int)syscall(SYS_IRQ_WAIT, handle, timeout_ticks, 0, 0);
 }
 
-/* ---------- Channel + Pulse IPC ---------------------------------------- */
+/* ---------- Channel + Pulse IPC ----------------------------------------
+ * Unified API for request-reply and async messaging between user apps.
+ * 
+ * Typical server usage:
+ *   ch = pup_channel_create();
+ *   while (1) {
+ *       cookie = pup_channel_receive(ch, &msg);
+ *       if (msg.type == PUP_MSG_TYPE_PULSE) { handle_event(); continue; }
+ *       result = process_request(msg.buf);
+ *       pup_channel_reply(ch, cookie, result);
+ *   }
+ *
+ * Typical client usage (RPC):
+ *   result = pup_channel_call(ch, shared_buf, sizeof(*shared_buf));
+ */
 
-static inline int channel_create(void) {
+static inline int pup_channel_create(void) {
     return (int)syscall(SYS_CHANNEL_CREATE, 0, 0, 0, 0);
 }
 
-static inline int channel_destroy(int channel_id) {
+static inline int pup_channel_destroy(int channel_id) {
     return (int)syscall(SYS_CHANNEL_DESTROY, channel_id, 0, 0, 0);
 }
 
 /*
- * msg_send: enqueue a request and block until the server replies.
- * buf must reside in shared memory (allocated via shared_malloc).
+ * pup_channel_call: enqueue a request and block until the server replies.
+ * Semantics: RPC - buf must reside in shared memory (allocated via shared_malloc).
+ * Returns: the long result supplied by pup_channel_reply(), or -1 on error.
  */
-static inline long msg_send(int channel_id, void *buf, int buf_sz) {
-    return syscall(SYS_MSG_SEND, channel_id, (long)buf, buf_sz, 0);
+static inline long pup_channel_call(int channel_id, void *buf, int buf_sz) {
+    return syscall(SYS_CHANNEL_CALL, channel_id, (long)buf, buf_sz, 0);
 }
 
 /*
- * msg_receive: block until a message arrives on channel_id.
- * Fills *msg; returns the cookie (0=pulse, >0=request).
+ * pup_channel_receive: block until a message arrives on channel_id.
+ * Fills *msg; returns the cookie (PUP_MSG_COOKIE_PULSE=0 for pulse, >0 for request).
  */
-static inline int msg_receive(int channel_id, pup_channel_msg_t *msg) {
-    return (int)syscall(SYS_MSG_RECEIVE, channel_id, (long)msg, 0, 0);
+static inline int pup_channel_receive(int channel_id, pup_channel_msg_t *msg) {
+    return (int)syscall(SYS_CHANNEL_RECEIVE, channel_id, (long)msg, 0, 0);
 }
 
 /*
- * msg_reply: complete a REQUEST identified by cookie.
- * result is returned to the blocked msg_send() caller.
+ * pup_channel_reply: complete a REQUEST identified by cookie.
+ * The blocked pup_channel_call() caller receives this result value.
  */
-static inline int msg_reply(int channel_id, int cookie, long result) {
-    return (int)syscall(SYS_MSG_REPLY, channel_id, cookie, result, 0);
+static inline int pup_channel_reply(int channel_id, int cookie, long result) {
+    return (int)syscall(SYS_CHANNEL_REPLY, channel_id, cookie, result, 0);
 }
 
 #endif

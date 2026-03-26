@@ -19,7 +19,7 @@
  *     result = pup_channel_send(id, shared_buf, sizeof(*shared_buf));
  *
  *   Kernel / ISR (non-blocking):
- *     pup_channel_post_pulse(id, IRQ_GPIOC, 0);
+ *     pup_channel_notify(id, IRQ_GPIOC, 0);
  */
 
 #include <puppy_core.h>
@@ -76,7 +76,7 @@ int pup_channel_reply(int channel_id, int cookie, long result);
  * value   – auxiliary data.
  * Returns 0 on success, -1 if the queue is full or the channel is invalid.
  */
-int pup_channel_post_pulse(int channel_id, int code, int value);
+int pup_channel_notify(int channel_id, int code, int value);
 
 /*
  * Release all channels owned by owner_pid (called on app exit).

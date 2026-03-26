@@ -250,7 +250,7 @@ static void gpio_service_loop(void)
 
     for (;;) {
         pup_channel_msg_t msg;
-        int cookie = msg_receive(g_server_channel, &msg);
+        int cookie = pup_channel_receive(g_server_channel, &msg);
 
         if (cookie < 0) {
             printf("[driver] channel receive failed, stop service\n");
@@ -264,7 +264,7 @@ static void gpio_service_loop(void)
 
         if (msg.type != PUP_MSG_TYPE_REQUEST || msg.buf == 0 || cookie <= 0) {
             if (cookie > 0) {
-                msg_reply(g_server_channel, cookie, -1);
+                pup_channel_reply(g_server_channel, cookie, -1);
             }
             continue;
         }
@@ -273,7 +273,7 @@ static void gpio_service_loop(void)
             pup_devfs_proxy_payload_t* req = (pup_devfs_proxy_payload_t*)msg.buf;
             gpio_user_dev_t* dev = gpio_find_by_id(req->device_id);
             int ret = gpio_handle_request(dev, req);
-            msg_reply(g_server_channel, cookie, ret);
+            pup_channel_reply(g_server_channel, cookie, ret);
         }
     }
 }
@@ -319,16 +319,16 @@ void app_main(const char* arg)
 
     printf("[driver] start\n");
 
-    g_server_channel = channel_create();
+    g_server_channel = pup_channel_create();
     if (g_server_channel < 0) {
-        printf("[driver] channel_create failed\n");
+        printf("[driver] pup_channel_create failed\n");
         pthread_exit((void*)-1);
     }
 
     for (i = 0; i < GPIO_DEV_COUNT; i++) {
         if (gpio_register_one(&g_devs[i]) != 0) {
             printf("[driver] failed at index=%d\n", i);
-            channel_destroy(g_server_channel);
+            pup_channel_destroy(g_server_channel);
             pthread_exit((void*)-1);
         }
     }
@@ -351,7 +351,7 @@ void app_main(const char* arg)
     gpio_service_loop();
 
     if (g_server_channel >= 0) {
-        channel_destroy(g_server_channel);
+        pup_channel_destroy(g_server_channel);
         g_server_channel = -1;
     }
 

@@ -74,7 +74,13 @@ target("puppy")
         os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/puppy.bin", target:targetfile())
     end)
 
-function define_user_app_target(target_name, app_source, output_bin_name, stack_size)
+function define_user_app_target(target_name, config)
+    local sources = config.sources or {}
+    local includes = config.includes or {}
+    local output_bin_name = config.output
+    local stack_size = config.stack_size
+    local defines = config.defines or {}
+    
     target(target_name)
         set_kind("binary")
         set_extension(".elf")
@@ -93,13 +99,22 @@ function define_user_app_target(target_name, app_source, output_bin_name, stack_
         end
 
         add_includedirs("apps/include", "core")
+        if #includes > 0 then
+            add_includedirs(includes)
+        end
+        
+        if #defines > 0 then
+            add_defines(defines)
+        end
 
-        add_files(
-            app_source,
-            "apps/runtime/app_bootstrap.c",
-            "apps/runtime/libc.c",
-            "apps/runtime/syscall.S"
-        )
+        local all_sources = {}
+        for _, src in ipairs(sources) do
+            table.insert(all_sources, src)
+        end
+        table.insert(all_sources, "apps/runtime/app_bootstrap.c")
+        table.insert(all_sources, "apps/runtime/libc.c")
+        table.insert(all_sources, "apps/runtime/syscall.S")
+        add_files(all_sources)
 
         after_build(function (target)
             os.mkdir("output")
@@ -107,11 +122,41 @@ function define_user_app_target(target_name, app_source, output_bin_name, stack_
         end)
 end
 
-define_user_app_target("hello", "apps/hello/main.c", "hello.bin")
-define_user_app_target("shell", "apps/shell/main.c", "shell.bin", "0x1000")
-define_user_app_target("test", "apps/test/main.c", "test.bin", "0x1000")
-define_user_app_target("mpu_test", "apps/mpu_test/main.c", "mpu_test.bin", "0x1000")
-define_user_app_target("driver", "apps/driver/main.c", "driver.bin", "0x1000")
+define_user_app_target("hello", {
+    sources = {"apps/hello/main.c"},
+    output = "hello.bin"
+})
+define_user_app_target("shell", {
+    sources = {"apps/shell/main.c"},
+    output = "shell.bin",
+    stack_size = "0x1000"
+})
+define_user_app_target("test", {
+    sources = {"apps/test/main.c"},
+    output = "test.bin",
+    stack_size = "0x1000"
+})
+define_user_app_target("mpu_test", {
+    sources = {"apps/mpu_test/main.c"},
+    output = "mpu_test.bin",
+    stack_size = "0x1000"
+})
+define_user_app_target("driver", {
+    sources = {
+        "apps/driver/main.c",
+        "apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
+        "apps/driver/dtm/ips/clk_arm_m4_st_gd.c"
+    },
+    includes = {
+        "apps/driver/dtm",
+        "apps/driver/dtm/common",
+        "apps/driver/dtm/ips",
+        "apps/driver/dtm/arch/arm/cortex-m4",
+        "apps/driver/dtm/chips/stm32f407"
+    },
+    output = "driver.bin",
+    stack_size = "0x1000"
+})
 
 target("firmware")
     set_kind("phony")

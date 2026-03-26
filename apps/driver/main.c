@@ -1,13 +1,7 @@
 #include "libc.h"
 #include "syscall.h"
-
-#define GPIOA_BASE 0x40020000U
-#define GPIOC_BASE 0x40020800U
-#define GPIOF_BASE 0x40021400U
-
-#define GPIO_PIN0   (1U << 0)
-#define GPIO_PIN5   (1U << 5)
-#define GPIO_PIN11  (1U << 11)
+#include "dtm_gpio.h"
+#include "dtm_bindings.h"
 
 #define GPIO_DIR_IN   0
 #define GPIO_DIR_OUT  1
@@ -20,19 +14,9 @@
 #define GPIO_DEV_COUNT 3
 
 typedef struct {
-    volatile unsigned int MODER;
-    volatile unsigned int OTYPER;
-    volatile unsigned int OSPEEDR;
-    volatile unsigned int PUPDR;
-    volatile unsigned int IDR;
-    volatile unsigned int ODR;
-    volatile unsigned int BSRR;
-} gpio_regs_t;
-
-typedef struct {
     const char* name;
-    unsigned int gpio_base;
-    unsigned short pin_mask;
+    uint32_t gpio_base;
+    uint16_t pin_mask;
     int device_id;
     int direction;
     int value;
@@ -43,84 +27,43 @@ static int g_server_channel = -1;
 static int g_key_irq_handle = -1;
 
 static gpio_user_dev_t g_devs[GPIO_DEV_COUNT] = {
-    {"gpio0", GPIOA_BASE, GPIO_PIN0,  0, GPIO_DIR_OUT, 0, 0},
-    {"led0",  GPIOF_BASE, GPIO_PIN11, 1, GPIO_DIR_OUT, 0, 0},
-    {"key0",  GPIOC_BASE, GPIO_PIN5,  2, GPIO_DIR_IN,  0, 1},
+    {"gpio0", GPIOA, DTM_GPIO_PIN0,  0, GPIO_DIR_OUT, 0, 0},
+    {"led0",  GPIOF, DTM_GPIO_PIN11, 1, GPIO_DIR_OUT, 0, 0},
+    {"key0",  GPIOC, DTM_GPIO_PIN5,  2, GPIO_DIR_IN,  0, 1},
 };
-
-static int gpio_pin_index(unsigned short pin_mask)
-{
-    int i;
-
-    for (i = 0; i < 16; i++) {
-        if ((pin_mask & (1U << i)) != 0U) {
-            return i;
-        }
-    }
-
-    return -1;
-}
 
 static void gpio_config(gpio_user_dev_t* dev)
 {
-    gpio_regs_t* regs;
-    int pin;
-    unsigned int mode_val;
-    unsigned int pull_val;
+    uint32_t mode;
+    uint32_t pupd;
 
     if (!dev) {
         return;
     }
 
-    regs = (gpio_regs_t*)dev->gpio_base;
-    pin = gpio_pin_index(dev->pin_mask);
-    if (pin < 0) {
-        return;
-    }
+    mode = (dev->direction == GPIO_DIR_IN) ? DTM_GPIO_MODE_IN : DTM_GPIO_MODE_OUT;
+    pupd = dev->pull_up ? DTM_GPIO_PUPD_PU : DTM_GPIO_PUPD_NONE;
 
-    mode_val = (dev->direction == GPIO_DIR_IN) ? 0U : 1U;
-    regs->MODER &= ~(3U << (pin * 2));
-    regs->MODER |= (mode_val << (pin * 2));
-
-    if (dev->direction == GPIO_DIR_OUT) {
-        regs->OTYPER &= ~(1U << pin);
-        regs->OSPEEDR &= ~(3U << (pin * 2));
-        regs->OSPEEDR |= (1U << (pin * 2));
-    }
-
-    pull_val = dev->pull_up ? 1U : 0U;
-    regs->PUPDR &= ~(3U << (pin * 2));
-    regs->PUPDR |= (pull_val << (pin * 2));
+    dtm_gpio_set(dev->gpio_base, dev->pin_mask, mode, DTM_GPIO_OTYPE_PP, DTM_GPIO_SPEED_MID, pupd);
 }
 
 static void gpio_write_level(gpio_user_dev_t* dev, int value)
 {
-    gpio_regs_t* regs;
-
     if (!dev) {
         return;
     }
 
-    regs = (gpio_regs_t*)dev->gpio_base;
-    if (value) {
-        regs->BSRR = (unsigned int)dev->pin_mask;
-    } else {
-        regs->BSRR = ((unsigned int)dev->pin_mask << 16);
-    }
-
+    dtm_gpio_pin_set(dev->gpio_base, dev->pin_mask, (uint8_t)value);
     dev->value = value ? 1 : 0;
 }
 
 static int gpio_read_level(gpio_user_dev_t* dev)
 {
-    gpio_regs_t* regs;
-
     if (!dev) {
         return 0;
     }
 
-    regs = (gpio_regs_t*)dev->gpio_base;
-    return ((regs->IDR & dev->pin_mask) != 0U) ? 1 : 0;
+    return (int)dtm_gpio_pin_get(dev->gpio_base, dev->pin_mask);
 }
 
 static int gpio_handle_request(gpio_user_dev_t* dev, pup_devfs_proxy_payload_t* req)
@@ -311,20 +254,10 @@ static int gpio_register_one(gpio_user_dev_t* dev)
     return 0;
 }
 
-// 硬件寄存器定义 - 这些寄存器在用户态可以访问
-#define RCC_BASE_ADDR             0x40023800UL
 #define SYSCFG_BASE_ADDR          0x40013800UL
 #define EXTI_BASE_ADDR            0x40013C00UL
-#define RCC_APB2ENR_OFFSET        0x44UL
-#define RCC_AHB1ENR_OFFSET        0x30UL
-#define RCC_APB2ENR_SYSCFGEN_BIT  (1U << 14)
-#define RCC_AHB1ENR_GPIOAEN_BIT   (1U << 0)
-#define RCC_AHB1ENR_GPIOCEN_BIT   (1U << 2)
-#define RCC_AHB1ENR_GPIOFEN_BIT   (1U << 5)
-
 #define GPIO_KEY0_EXTI_LINE_BIT   (1U << 5)
 
-// 寄存器结构体
 typedef struct {
     volatile uint32_t MEMRMP;
     volatile uint32_t PMC;
@@ -342,26 +275,17 @@ typedef struct {
 
 static void gpio_irq_config(void)
 {
-    volatile uint32_t *apb2enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_APB2ENR_OFFSET);
-    volatile uint32_t *ahb1enr = (volatile uint32_t *)(RCC_BASE_ADDR + RCC_AHB1ENR_OFFSET);
     pup_syscfg_regs_t *syscfg = (pup_syscfg_regs_t *)SYSCFG_BASE_ADDR;
     pup_exti_regs_t *exti = (pup_exti_regs_t *)EXTI_BASE_ADDR;
 
-    /* Enable SYSCFG clock so EXTICR mapping is writable. */
-    *apb2enr |= RCC_APB2ENR_SYSCFGEN_BIT;
-    *ahb1enr |= (RCC_AHB1ENR_GPIOAEN_BIT | RCC_AHB1ENR_GPIOCEN_BIT | RCC_AHB1ENR_GPIOFEN_BIT);
-
-    /* Route EXTI line 5 to port C (0x2). EXTICR2 bits [7:4]. */
     syscfg->EXTICR[1] &= ~(0xFU << 4);
     syscfg->EXTICR[1] |= (0x2U << 4);
 
-    /* Unmask line 5 and trigger on both edges to catch press/release. */
     exti->IMR |= GPIO_KEY0_EXTI_LINE_BIT;
     exti->RTSR |= GPIO_KEY0_EXTI_LINE_BIT;
     exti->FTSR |= GPIO_KEY0_EXTI_LINE_BIT;
     exti->PR = GPIO_KEY0_EXTI_LINE_BIT;
 
-    /* 使用系统调用配置 NVIC 中断 */
     irq_control(PUP_IRQ_EXTI9_5, IRQ_CONTROL_SET_PRIORITY, 2);
     irq_control(PUP_IRQ_EXTI9_5, IRQ_CONTROL_ENABLE, 0);
 
@@ -376,7 +300,6 @@ void app_main(const char* arg)
 
     printf("[driver] start\n");
 
-    // 配置GPIO中断
     gpio_irq_config();
 
     g_server_channel = pup_channel_create();

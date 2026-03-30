@@ -36,7 +36,7 @@ target("puppy")
     add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -Wa,-mimplicit-it=thumb -ffunction-sections -fdata-sections -fno-builtin-printf')
     add_mode_compile_flags()
     add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections,-Map=build/puppy.map,-cref,-u,Reset_Handler',{force = true})
-    add_ldflags(' -T ' .. os.scriptdir() .. '/dtm/link.lds')
+    add_ldflags(' -T ' .. os.scriptdir() .. '/core/dtm/link.lds')
     add_ldflags(' -Wl,--defsym,DTM_FLASH_BASE=' .. DTM_FLASH_BASE .. ' -Wl,--defsym,DTM_RAM_BASE=' .. DTM_RAM_BASE .. ' -Wl,--defsym,DTM_FLASH_SIZE=' .. DTM_FLASH_SIZE)
 
     add_includedirs(
@@ -47,31 +47,31 @@ target("puppy")
         "core/kernel",
         "core/arch",
         "core/ipc",
-        "dtm",
-        "dtm/ips",
-        "dtm/common",
-        "dtm/arch/arm/cortex-m4",
-        "libcm"
+        "core/dtm",
+        "core/dtm/ips",
+        "core/dtm/common",
+        "core/dtm/arch/arm/cortex-m4",
+        "core/libcm"
     )
 
     add_files(
         "core/*.c",
         "core/**/*.c",
-        "core/**/*.S",
-        "dtm/ips/*.c",
-        "libcm/libcm.c",
-        "dtm/chips/stm32f407/start.s"
+        "core/arch/*.S",
+        "core/dtm/ips/*.c",
+        "core/libcm/libcm.c",
+        "core/dtm/chips/stm32f407/start.s"
     )
     
     add_defines("PUP_MPU_ENABLED")
 
     add_includedirs(
-        "dtm/chips/stm32f407"
+        "core/dtm/chips/stm32f407"
     )
 
     after_build(function (target)
-        os.mkdir("output")
-        os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/puppy.bin", target:targetfile())
+        os.mkdir("output/kernel")
+        os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/kernel/puppy.bin", target:targetfile())
     end)
 
 function define_user_app_target(target_name, config)
@@ -93,12 +93,12 @@ function define_user_app_target(target_name, config)
         add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -ffunction-sections -fdata-sections')
         add_mode_compile_flags()
         add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
-        add_ldflags(' -T ' .. os.scriptdir() .. '/apps/linker/app.lds')
+        add_ldflags(' -T ' .. os.scriptdir() .. '/apps/lib/linker/app.lds')
         if stack_size ~= nil then
             add_ldflags(' -Wl,--defsym,__user_app_stack_size=' .. stack_size)
         end
 
-        add_includedirs("apps/include", "core")
+        add_includedirs("apps/lib/include", "core")
         if #includes > 0 then
             add_includedirs(includes)
         end
@@ -111,48 +111,48 @@ function define_user_app_target(target_name, config)
         for _, src in ipairs(sources) do
             table.insert(all_sources, src)
         end
-        table.insert(all_sources, "apps/runtime/app_bootstrap.c")
-        table.insert(all_sources, "apps/runtime/libc.c")
-        table.insert(all_sources, "apps/runtime/syscall.S")
+        table.insert(all_sources, "apps/lib/runtime/app_bootstrap.c")
+        table.insert(all_sources, "apps/lib/runtime/libc.c")
+        table.insert(all_sources, "apps/lib/runtime/syscall.S")
         add_files(all_sources)
 
         after_build(function (target)
-            os.mkdir("output")
-            os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/" .. output_bin_name, target:targetfile())
+            os.mkdir("output/apps")
+            os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/apps/" .. output_bin_name, target:targetfile())
         end)
 end
 
 define_user_app_target("hello", {
-    sources = {"apps/hello/main.c"},
+    sources = {"apps/apps/hello/main.c"},
     output = "hello.bin"
 })
 define_user_app_target("shell", {
-    sources = {"apps/shell/main.c"},
+    sources = {"apps/apps/shell/main.c"},
     output = "shell.bin",
     stack_size = "0x1000"
 })
 define_user_app_target("test", {
-    sources = {"apps/test/main.c"},
+    sources = {"apps/apps/test/main.c"},
     output = "test.bin",
     stack_size = "0x1000"
 })
 define_user_app_target("mpu_test", {
-    sources = {"apps/mpu_test/main.c"},
+    sources = {"apps/apps/mpu_test/main.c"},
     output = "mpu_test.bin",
     stack_size = "0x1000"
 })
 define_user_app_target("driver", {
     sources = {
-        "apps/driver/main.c",
-        "apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
-        "apps/driver/dtm/ips/clk_arm_m4_st_gd.c"
+        "apps/apps/driver/main.c",
+        "apps/apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
+        "apps/apps/driver/dtm/ips/clk_arm_m4_st_gd.c"
     },
     includes = {
-        "apps/driver/dtm",
-        "apps/driver/dtm/common",
-        "apps/driver/dtm/ips",
-        "apps/driver/dtm/arch/arm/cortex-m4",
-        "apps/driver/dtm/chips/stm32f407"
+        "apps/apps/driver/dtm",
+        "apps/apps/driver/dtm/common",
+        "apps/apps/driver/dtm/ips",
+        "apps/apps/driver/dtm/arch/arm/cortex-m4",
+        "apps/apps/driver/dtm/chips/stm32f407"
     },
     output = "driver.bin",
     stack_size = "0x1000"
@@ -168,6 +168,7 @@ target("firmware")
     after_build(function (target)
         local mode = is_mode("debug") and "debug" or "release"
         print("Packing ROMFS and creating unified firmware...")
-        os.run("python tools/merge_firmware.py --apps-dir output")
+        os.mkdir("output/firmware")
+        os.run("python tools/merge_firmware.py --apps-dir output/apps")
         os.exec("python tools/build_resource_report.py --mode %s", mode)
     end)

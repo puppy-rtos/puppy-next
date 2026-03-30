@@ -5,8 +5,8 @@ pushd "%SCRIPT_DIR%.."
 echo Starting QEMU test...
 echo.
 
-if not exist "output\firmware.bin" (
-	echo ERROR: output\firmware.bin not found. Build firmware first.
+if not exist "output\firmware\firmware.bin" (
+	echo ERROR: output\firmware\firmware.bin not found. Build firmware first.
 	popd
 	exit /b 1
 )

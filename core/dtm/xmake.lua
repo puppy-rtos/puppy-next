@@ -7,15 +7,15 @@ target_end()
 
 -- 包含路径
 add_includedirs(
-    ".",
-    "./ips",
-    "./common"
+    "core/dtm",
+    "core/dtm/ips",
+    "core/dtm/common"
 )
 
 -- 源文件
 add_files(
-    "main.c",
-    "ips/*.c"
+    "core/dtm/main.c",
+    "core/dtm/ips/*.c"
 )
 
 -- 项目配置
@@ -35,13 +35,13 @@ target("stm32f407-dtm")
 
     -- 包含路径
     add_includedirs(
-        "arch/arm/cortex-m4",
-        "./chips/stm32f407"
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/stm32f407"
     )
 
     -- 源文件
     add_files(
-        "chips/stm32f407/start.s"
+        "core/dtm/chips/stm32f407/start.s"
     )
 
     -- 构建后生成bin文件
@@ -67,13 +67,13 @@ target("stm32f412-dtm")
 
     -- 包含路径
     add_includedirs(
-        "arch/arm/cortex-m4",
-        "./chips/stm32f412"
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/stm32f412"
     )
 
     -- 源文件
     add_files(
-        "chips/stm32f412/start.s"
+        "core/dtm/chips/stm32f412/start.s"
     )
     
     -- 构建后生成bin文件
@@ -99,13 +99,13 @@ target("stm32h750-dtm")
 
     -- 包含路径
     add_includedirs(
-        "arch/arm/cortex-m4",
-        "./chips/stm32h750"
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/stm32h750"
     )
 
     -- 源文件
     add_files(
-        "chips/stm32h750/start.s"
+        "core/dtm/chips/stm32h750/start.s"
     )
 
     -- 构建后生成bin文件
@@ -132,13 +132,13 @@ target("gd32h759-dtm")
     
     -- 包含路径
     add_includedirs(
-        "arch/arm/cortex-m4",
-        "./chips/gd32h759"
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/gd32h759"
     )
 
     -- 源文件
     add_files(
-        "chips/gd32h759/start.s"
+        "core/dtm/chips/gd32h759/start.s"
     )
     
     -- 构建后生成bin文件
@@ -164,13 +164,13 @@ target("gd32f427-dtm")
 
     -- 包含路径
     add_includedirs(
-        "arch/arm/cortex-m4",
-        "./chips/gd32f427"
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/gd32f427"
     )
 
     -- 源文件
     add_files(
-        "chips/gd32f427/start.s"
+        "core/dtm/chips/gd32f427/start.s"
     )
 
     -- 构建后生成bin文件

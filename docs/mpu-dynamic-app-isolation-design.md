@@ -118,7 +118,7 @@ typedef struct {
   - `core/kernel/syscall.h`
   - `core/kernel/syscall.c`
 - User side wrapper:
-  - `apps/include/syscall.h`
+  - `apps/lib/include/syscall.h`
 
 Proposed user API:
 
@@ -336,7 +336,7 @@ Done criteria:
 ### Task 4: Extend mpu_test for self and boundary probes
 
 Implementation scope:
-- Update [apps/mpu_test/main.c](../apps/mpu_test/main.c) to add:
+- Update [apps/apps/mpu_test/main.c](../apps/apps/mpu_test/main.c) to add:
   - `self` mode: print `ram_start`, `ram_end`.
   - `violate` mode: test `ram_start - 1` and `ram_end` boundary probes.
 
@@ -358,7 +358,7 @@ Implementation scope:
 - Do not force fixed 32KB default.
 
 Primary files:
-- [dtm/ips/mpu_arm_m4_st_gd.c](../dtm/ips/mpu_arm_m4_st_gd.c)
+- [core/dtm/ips/mpu_arm_m4_st_gd.c](../core/dtm/ips/mpu_arm_m4_st_gd.c)
 - [core/kernel/mpu.c](../core/kernel/mpu.c)
 - [core/kernel/mpu.h](../core/kernel/mpu.h)
 

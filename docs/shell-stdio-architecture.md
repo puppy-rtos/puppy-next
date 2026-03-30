@@ -23,8 +23,8 @@
 ### 2.2 Address-space model
 
 - Kernel image:
-  - ROM: from `DTM_FLASH_BASE` (`dtm/link.lds`)
-  - RAM: from `DTM_RAM_BASE` (`dtm/link.lds`)
+  - ROM: from `DTM_FLASH_BASE` (`core/dtm/link.lds`)
+  - RAM: from `DTM_RAM_BASE` (`core/dtm/link.lds`)
 - User app image:
   - ROM: `0x08080000` (`user_apps/linker/app.lds`)
   - RAM: `0x20010000` (`user_apps/linker/app.lds`)

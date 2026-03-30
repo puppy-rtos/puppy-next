@@ -242,7 +242,7 @@ This keeps kernel policy simple and makes bugs observable. Supervision can be ad
 Primary implementation targets:
 - `core/kernel/syscall.h`
 - `core/kernel/syscall.c`
-- `apps/include/syscall.h`
+- `apps/lib/include/syscall.h`
 - `core/fs/pup_devfs.h`
 - `core/fs/pup_devfs.c`
 - `core/app/app_manager.c`

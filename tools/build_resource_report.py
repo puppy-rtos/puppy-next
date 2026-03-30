@@ -128,9 +128,9 @@ def main():
     parser.add_argument("--mode", default="release", help="build mode (debug/release)")
     args = parser.parse_args()
 
-    puppy_bin = os.path.join("output", "puppy.bin")
-    romfs_bin = os.path.join("output", "romfs.bin")
-    firmware_bin = os.path.join("output", "firmware.bin")
+    puppy_bin = os.path.join("output", "kernel", "puppy.bin")
+    romfs_bin = os.path.join("output", "firmware", "romfs.bin")
+    firmware_bin = os.path.join("output", "firmware", "firmware.bin")
     map_file = os.path.join("build", "puppy.map")
 
     puppy_size = safe_size(puppy_bin)

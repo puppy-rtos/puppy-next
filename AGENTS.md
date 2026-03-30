@@ -18,8 +18,11 @@
 - `core/dev/`: 设备层（GPIO/UART/console）。
 - `core/fs/`: 文件系统与 devfs/romfs 相关实现。
 - `core/app/`: 用户应用加载与管理。
-- `dtm/`: 板级与芯片支持包、链接脚本、启动文件。
-- `apps/`: 用户态 app、运行时、链接脚本。
+- `core/dtm/`: 板级与芯片支持包（BSP）、链接脚本、启动文件。
+- `core/libcm/`: 内核态最小 C 库（printf/mem/str/malloc）。
+- `apps/`: 用户态 app 与基础设施。
+- `apps/lib/`: 用户态基础设施（公共头文件、链接脚本、运行时）。
+- `apps/services/`: 系统服务预留目录。
 - `tools/`: QEMU 启动脚本与固件打包脚本。
 - `output/`: 构建产物目录（如 `puppy.bin`、`firmware.bin`、`*_app.bin`）。
 
@@ -54,17 +57,17 @@ xmake build firmware
 
 1. `README.md`
 2. `xmake.lua`
-3. `apps/shell.c`
+3. `apps/apps/shell/main.c`
 4. `core/kernel/puppy_core.c`
 5. `core/syscall*` 与 `core/arch/*`
 6. `core/fs/*`（若问题与文件系统/设备节点相关）
-7. `core/app/*` 与 `apps/*`（若问题与用户态应用相关）
+7. `core/app/*` 与 `apps/apps/*`（若问题与用户态应用相关）
 
 ## 5. 修改原则（面向智能体）
 
 - 只做最小必要改动，避免无关重构和大面积格式化。
 - 优先保持已有接口与宏命名风格，除非任务明确要求重命名。
-- 涉及架构相关代码时，检查是否同时影响 `core/arch/` 与 `dtm/chips/*`。
+- 涉及架构相关代码时，检查是否同时影响 `core/arch/` 与 `core/dtm/chips/*`。
 - 新增 shell 命令时，需要同步:
   - 命令声明
   - 命令表 `shell_cmds`
@@ -82,10 +85,10 @@ xmake build firmware
 ## 7. 常见入口文件
 
 - 构建入口: `xmake.lua`
-- 内核 shell: `apps/shell.c`
+- 内核 shell: `apps/apps/shell/main.c`
 - 固件合并: `tools/merge_firmware.py`
 - QEMU 启动入口: `qemu-run.bat`、`tools/qemu-run.bat`
 
 ---
 
-如果任务目标不明确，智能体应先说明假设，再从 `apps/shell.c` 与 `core/kernel/` 开始最小范围定位。
+如果任务目标不明确，智能体应先说明假设，再从 `apps/apps/shell/main.c` 与 `core/kernel/` 开始最小范围定位。

@@ -199,18 +199,18 @@ def parse_args(argv):
     )
     parser.add_argument(
         "--kernel",
-        default=os.path.join(default_output_dir, "puppy.bin"),
-        help="kernel binary path (default: output/puppy.bin)",
+        default=os.path.join(default_output_dir, "kernel", "puppy.bin"),
+        help="kernel binary path (default: output/kernel/puppy.bin)",
     )
     parser.add_argument(
         "--romfs",
-        default=os.path.join(default_output_dir, "romfs.bin"),
-        help="ROMFS binary path (default: output/romfs.bin)",
+        default=os.path.join(default_output_dir, "firmware", "romfs.bin"),
+        help="ROMFS binary path (default: output/firmware/romfs.bin)",
     )
     parser.add_argument(
         "--output",
-        default=os.path.join(default_output_dir, "firmware.bin"),
-        help="output firmware path (default: output/firmware.bin)",
+        default=os.path.join(default_output_dir, "firmware", "firmware.bin"),
+        help="output firmware path (default: output/firmware/firmware.bin)",
     )
     parser.add_argument(
         "--apps-dir",
@@ -236,7 +236,7 @@ def main(argv=None):
 
     if not os.path.exists(args.romfs):
         print(f"Error: ROMFS binary not found: {args.romfs}")
-        print("Tip: pass --apps-dir output to generate ROMFS first.")
+        print("Tip: pass --apps-dir output/apps to generate ROMFS first.")
         return 1
 
     merge_kernel_and_romfs(args.kernel, args.romfs, args.output)

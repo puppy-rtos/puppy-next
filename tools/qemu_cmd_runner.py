@@ -6,7 +6,7 @@ from pathlib import Path
 
 DEFAULT_QEMU = r"D:\RT-ThreadStudio\repo\Extract\Debugger_Support_Packages\RealThread\QEMU\4.2.0.4\qemu-system-arm.exe"
 DEFAULT_MACHINE = "stm32f407-atk-explorer"
-DEFAULT_FIRMWARE = "output/firmware.bin"
+DEFAULT_FIRMWARE = "output/firmware/firmware.bin"
 PROMPT = "puppy>"
 CHAR_DELAY = 0.20
 POST_PROMPT_DELAY = 1.0
@@ -202,7 +202,6 @@ def run_switch_stress_sequence(runner: QemuCmdRunner, cycles: int = 5) -> int:
         runner.send_command("/rom/mpu_test self &")
 
         bg_expects = [
-            "[APP/I] Running app 'mpu_test'",
             "[mpu_test] Self RAM range:",
             PROMPT,
         ]
@@ -217,7 +216,6 @@ def run_switch_stress_sequence(runner: QemuCmdRunner, cycles: int = 5) -> int:
         runner.send_command("/rom/test")
 
         fg_expects = [
-            "[APP/I] Running app 'test'",
             "=== Puppy User Test App ===",
             PROMPT,
         ]

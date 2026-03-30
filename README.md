@@ -96,7 +96,7 @@ xmake build firmware
 
 ### 5.1 目录约定
 
-- apps/<app_name>/main.c：用户应用入口
+- apps/apps/<app_name>/main.c：用户应用入口
 - apps/runtime：用户态运行时与 syscall 桥
 - apps/linker/app.lds：用户应用链接脚本
 - apps/include：用户态公共头文件
@@ -111,7 +111,8 @@ xmake build firmware
 
 ## 6. 核心目录速览
 
-- apps：内核入口、shell、测试入口
+- apps：用户态应用（shell、hello、test、driver）
+- apps/lib：用户态基础设施（头文件、链接脚本、运行时）
 - core/kernel：调度、syscall、内存堆、MPU
 - core/app：用户应用装载与生命周期管理
 - core/fs：VFS、ROMFS、DEVFS

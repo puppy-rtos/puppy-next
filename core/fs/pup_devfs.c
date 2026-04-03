@@ -348,23 +348,19 @@ static int proxy_close(pup_devfs_file_t *file)
     return 0;
 }
 
+/* Passthrough read: buf must be pre-allocated in shared memory by caller. */
 static int proxy_read(pup_devfs_file_t *file, char *buf, int len)
 {
     int ch = file->device->channel_id;
     pup_devfs_proxy_payload_t *payload;
-    void *data_buf = PUP_NULL;
     long result;
 
-    if (len <= 0) {
+    if (len <= 0 || !buf) {
         return 0;
     }
+
     payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
     if (!payload) {
-        return -5;
-    }
-    data_buf = kheap_shared_malloc((pup_size_t)len);
-    if (!data_buf) {
-        kheap_shared_free(payload);
         return -5;
     }
 
@@ -372,62 +368,59 @@ static int proxy_read(pup_devfs_file_t *file, char *buf, int len)
     payload->device_id = file->device->device_id;
     payload->flags    = 0;
     payload->cmd      = 0;
-    payload->data_buf = data_buf;
+    payload->data_buf = (void *)buf;  /* passthrough: no kernel copy */
     payload->data_len = len;
 
     result = pup_channel_send(ch, payload, sizeof(*payload));
 
-    if (result > 0 && buf) {
-        libcm_memcpy(buf, data_buf, (int)result);
-    }
-
-    kheap_shared_free(data_buf);
     kheap_shared_free(payload);
     return (int)result;
 }
 
+/* Passthrough write: buf must be pre-allocated in shared memory by caller. */
 static int proxy_write(pup_devfs_file_t *file, const char *buf, int len)
 {
     int ch = file->device->channel_id;
     pup_devfs_proxy_payload_t *payload;
-    void *data_buf = PUP_NULL;
     long result;
 
-    if (len <= 0) {
+    if (len <= 0 || !buf) {
         return 0;
     }
+
     payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
     if (!payload) {
         return -5;
-    }
-    data_buf = kheap_shared_malloc((pup_size_t)len);
-    if (!data_buf) {
-        kheap_shared_free(payload);
-        return -5;
-    }
-    if (buf) {
-        libcm_memcpy(data_buf, buf, len);
     }
 
     payload->op       = DEVFS_PROXY_OP_WRITE;
     payload->device_id = file->device->device_id;
     payload->flags    = 0;
     payload->cmd      = 0;
-    payload->data_buf = data_buf;
+    payload->data_buf = (void *)buf;  /* passthrough: no kernel copy */
     payload->data_len = len;
 
     result = pup_channel_send(ch, payload, sizeof(*payload));
 
-    kheap_shared_free(data_buf);
     kheap_shared_free(payload);
     return (int)result;
 }
 
+/*
+ * Passthrough ioctl: arg must be a pointer to a shared-memory region
+ * containing the ioctl argument structure. The kernel does NOT copy,
+ * translate, or interpret the argument -- it passes the pointer directly
+ * to the driver as payload->data_buf.
+ *
+ * SPI TRANSFER layout convention (caller responsibility):
+ *   shared_mem[0 .. sizeof(xfer)-1]           = pup_spi_transfer_t
+ *   shared_mem[sizeof(xfer) .. +len-1]        = TX data  (xfer.tx_buf points here)
+ *   shared_mem[sizeof(xfer)+len .. +2*len-1]  = RX space (xfer.rx_buf points here)
+ */
 static int proxy_ioctl(pup_devfs_file_t *file, int cmd, void *arg)
 {
     int ch = file->device->channel_id;
     pup_devfs_proxy_payload_t *payload;
-    void *data_buf = PUP_NULL;
     long result;
 
     payload = (pup_devfs_proxy_payload_t *)kheap_shared_malloc(sizeof(*payload));
@@ -435,34 +428,15 @@ static int proxy_ioctl(pup_devfs_file_t *file, int cmd, void *arg)
         return -5;
     }
 
-    /* Copy the ioctl argument (assumed to be ≤ 4 bytes, e.g. GPIO value) to
-     * shared memory so the user-mode driver can access it safely. */
-    if (arg) {
-        data_buf = kheap_shared_malloc(sizeof(unsigned int));
-        if (!data_buf) {
-            kheap_shared_free(payload);
-            return -5;
-        }
-        *(unsigned int *)data_buf = *(unsigned int *)arg;
-    }
-
-    payload->op       = DEVFS_PROXY_OP_IOCTL;
+    payload->op        = DEVFS_PROXY_OP_IOCTL;
     payload->device_id = file->device->device_id;
-    payload->flags    = 0;
-    payload->cmd      = cmd;
-    payload->data_buf = data_buf;
-    payload->data_len = arg ? (int)sizeof(unsigned int) : 0;
+    payload->flags     = 0;
+    payload->cmd       = cmd;
+    payload->data_buf  = arg;     /* passthrough: no kernel copy or translation */
+    payload->data_len  = 0;       /* driver knows struct size from cmd */
 
     result = pup_channel_send(ch, payload, sizeof(*payload));
 
-    /* Copy result back for GET-style ioctls */
-    if (result >= 0 && data_buf && arg) {
-        *(unsigned int *)arg = *(unsigned int *)data_buf;
-    }
-
-    if (data_buf) {
-        kheap_shared_free(data_buf);
-    }
     kheap_shared_free(payload);
     return (int)result;
 }

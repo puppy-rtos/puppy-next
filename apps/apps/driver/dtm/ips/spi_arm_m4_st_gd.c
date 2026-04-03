@@ -4,6 +4,7 @@
 #include "dtm_spi.h"
 #include "dtm_gpio.h"
 #include "dtm_clk.h"
+#include <stdio.h>
 
 /* SPI register structure definition */
 typedef struct {
@@ -51,10 +52,38 @@ static int spi_to_clk_id(uint32_t spi_base)
     return clk_id;
 }
 
+#define DTM_SPI_TIMEOUT  0xFFFFFU
+
 static void spi_wait_not_busy(SPI_TypeDef *spi)
 {
+    volatile unsigned int timeout = DTM_SPI_TIMEOUT;
     while (spi->SR & SPI_SR_BSY) {
+        if (--timeout == 0) {
+            break;
+        }
     }
+}
+
+static int spi_wait_txe(SPI_TypeDef *spi)
+{
+    volatile unsigned int timeout = DTM_SPI_TIMEOUT;
+    while (!(spi->SR & SPI_SR_TXE)) {
+        if (--timeout == 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int spi_wait_rxne(SPI_TypeDef *spi)
+{
+    volatile unsigned int timeout = DTM_SPI_TIMEOUT;
+    while (!(spi->SR & SPI_SR_RXNE)) {
+        if (--timeout == 0) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -147,20 +176,28 @@ void dtm_spi_disable(uint32_t spi_base)
 uint8_t dtm_spi_transmit_byte(uint32_t spi_base, uint8_t data)
 {
     SPI_TypeDef *spi = (SPI_TypeDef *)spi_base;
+    uint8_t rx = 0xFF;
+    int txe_rc, rxne_rc;
     
-    /* 等待发送缓冲区为空 */
-    while (!(spi->SR & SPI_SR_TXE));
+    txe_rc = spi_wait_txe(spi);
+    if (txe_rc != 0) {
+        printf("[spi] tx_byte: TXE timeout SR=0x%08lX\n", (unsigned long)spi->SR);
+        return rx;
+    }
     
-    /* 发送数据 */
     *(volatile uint8_t *)&spi->DR = data;
     
-    /* 等待接收缓冲区非空 */
-    while (!(spi->SR & SPI_SR_RXNE));
+    rxne_rc = spi_wait_rxne(spi);
+    if (rxne_rc != 0) {
+        printf("[spi] tx_byte: RXNE timeout SR=0x%08lX (sent=0x%02X)\n",
+               (unsigned long)spi->SR, data);
+        return rx;
+    }
 
     spi_wait_not_busy(spi);
     
-    /* 返回接收到的数据 */
-    return *(volatile uint8_t *)&spi->DR;
+    rx = *(volatile uint8_t *)&spi->DR;
+    return rx;
 }
 
 /**
@@ -172,19 +209,20 @@ uint8_t dtm_spi_transmit_byte(uint32_t spi_base, uint8_t data)
 uint16_t dtm_spi_transmit_halfword(uint32_t spi_base, uint16_t data)
 {
     SPI_TypeDef *spi = (SPI_TypeDef *)spi_base;
+    uint16_t rx = 0xFFFF;
     
-    /* 等待发送缓冲区为空 */
-    while (!(spi->SR & SPI_SR_TXE));
+    if (spi_wait_txe(spi) != 0) {
+        return rx;
+    }
     
-    /* 发送数据 */
     *(volatile uint16_t *)&spi->DR = data;
     
-    /* 等待接收缓冲区非空 */
-    while (!(spi->SR & SPI_SR_RXNE));
+    if (spi_wait_rxne(spi) != 0) {
+        return rx;
+    }
 
     spi_wait_not_busy(spi);
     
-    /* 返回接收到的数据 */
     return *(volatile uint16_t *)&spi->DR;
 }
 

@@ -70,7 +70,8 @@ void *puppy_main_thread(void *arg) {
     dev_uart_init();
     /* GPIO/LED/KEY are served by user-mode driver (Channel+Pulse path). */
     dev_irq_init();
-    dev_spi_init();
+    /* SPI2 is served by user-mode driver; kernel spi2 init disabled. */
+    /* dev_spi_init(); */
 
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Registering romfs");
     pup_romfs_init();

@@ -144,8 +144,11 @@ define_user_app_target("mpu_test", {
 define_user_app_target("driver", {
     sources = {
         "apps/apps/driver/main.c",
+        "apps/apps/driver/driver_gpio.c",
+        "apps/apps/driver/driver_spi.c",
         "apps/apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
-        "apps/apps/driver/dtm/ips/clk_arm_m4_st_gd.c"
+        "apps/apps/driver/dtm/ips/clk_arm_m4_st_gd.c",
+        "apps/apps/driver/dtm/ips/spi_arm_m4_st_gd.c"
     },
     includes = {
         "apps/apps/driver/dtm",

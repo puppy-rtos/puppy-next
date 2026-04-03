@@ -3,6 +3,10 @@
 #include "shared/pup_spi.h"
 #include <string.h>
 
+#ifndef PUP_NULL
+#define PUP_NULL    ((void*)0)
+#endif
+
 #define O_RDONLY    0000000
 #define O_WRONLY    0000001
 #define O_RDWR      0000002
@@ -530,28 +534,7 @@ static int test_mpu_after_app_ram(void)
 static volatile int mpu_violation_thread_returned;
 static volatile unsigned int mpu_violation_sink;
 
-static char mpu_kernel_violation_stack[512];
 static char mpu_flash_violation_stack[512];
-
-static void *mpu_kernel_violation_thread(void *arg)
-{
-    (void)arg;
-    volatile unsigned int *kernel_addr;
-
-    /* Try accessing kernel RAM at 0x20008000 (middle of kernel RAM region)
-     * This address should be protected by MPU region 1 (privileged only)
-     */
-    printf("[mpu_violation] Attempting to read kernel RAM at 0x20008000...\n");
-
-    /* This should trigger MemManage fault and kill this thread */
-    kernel_addr = (volatile unsigned int *)0x20008000;
-    mpu_violation_sink = *kernel_addr;
-
-    /* If we reach here, the protection failed */
-    mpu_violation_thread_returned = 1;
-    printf("[mpu_violation] ERROR: Kernel RAM access succeeded - MPU protection FAILED!\n");
-    return NULL;
-}
 
 static void *mpu_flash_violation_thread(void *arg)
 {
@@ -661,22 +644,40 @@ static int test_devfs(void)
 {
     int fd;
     int written;
+    char *shm_msg = (char *)PUP_NULL;
     const char *msg = "Hello from user test app!\n";
-    char val;
-    char read_val = 0;
+    char *shm_val  = (char *)PUP_NULL;
+    char *shm_read = (char *)PUP_NULL;
 
     printf("\n=== DevFS Test ===\n");
+
+    shm_msg = (char *)shared_malloc(64);
+    shm_val  = (char *)shared_malloc(1);
+    shm_read = (char *)shared_malloc(1);
+    if (!shm_msg || !shm_val || !shm_read) {
+        printf("shared_malloc failed\n");
+        if (shm_msg) shared_free(shm_msg);
+        if (shm_val) shared_free(shm_val);
+        if (shm_read) shared_free(shm_read);
+        return -1;
+    }
 
     printf("\n--- Test 1: Open UART device ---\n");
     fd = open("/dev/uart0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open uart0, fd=%d\n", fd);
-        return -1;
+        goto fail;
     }
     printf("Opened uart0, fd=%d\n", fd);
 
     printf("\n--- Test 2: Write to UART ---\n");
-    written = (int)write(fd, msg, (long)strlen(msg));
+    {
+        size_t msg_len = strlen(msg);
+        if (msg_len >= 64) msg_len = 63;
+        memcpy(shm_msg, msg, msg_len);
+        shm_msg[msg_len] = '\0';
+        written = write(fd, shm_msg, (long)msg_len);
+    }
     printf("Written %d bytes\n", written);
 
     printf("\n--- Test 3: Close UART ---\n");
@@ -687,27 +688,34 @@ static int test_devfs(void)
     fd = open("/dev/gpio0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open gpio0, fd=%d\n", fd);
-        return -1;
+        goto fail;
     }
     printf("Opened gpio0, fd=%d\n", fd);
 
     printf("\n--- Test 5: GPIO write/read ---\n");
-    val = 1;
-    write(fd, &val, 1);
+    *shm_val = 1;
+    write(fd, shm_val, 1);
     printf("Set GPIO high\n");
 
-    val = 0;
-    write(fd, &val, 1);
+    *shm_val = 0;
+    write(fd, shm_val, 1);
     printf("Set GPIO low\n");
 
-    read(fd, &read_val, 1);
-    printf("Read GPIO value: %d\n", read_val);
+    read(fd, shm_read, 1);
+    printf("Read GPIO value: %d\n", *shm_read);
 
     close(fd);
     printf("Closed gpio0\n");
 
     printf("\nDevFS test completed\n");
+    shared_free(shm_msg); shared_free(shm_val); shared_free(shm_read);
     return 0;
+
+fail:
+    if (shm_msg) shared_free(shm_msg);
+    if (shm_val) shared_free(shm_val);
+    if (shm_read) shared_free(shm_read);
+    return -1;
 }
 
 static int test_romfs(void)
@@ -780,28 +788,42 @@ static int test_romfs(void)
 static int test_led(void)
 {
     int fd;
-    char high = 1;
-    char low = 0;
+    char *shm_high = (char *)PUP_NULL;
+    char *shm_low  = (char *)PUP_NULL;
     int cycles = 3;
+    int i;
 
     printf("\n=== LED Test (PF11) ===\n");
     printf("Blinking /dev/led0 at 1Hz for 3 seconds...\n");
 
+    shm_high = (char *)shared_malloc(1);
+    shm_low  = (char *)shared_malloc(1);
+    if (!shm_high || !shm_low) {
+        printf("shared_malloc failed\n");
+        if (shm_high) shared_free(shm_high);
+        if (shm_low)  shared_free(shm_low);
+        return -1;
+    }
+    *shm_high = 1;
+    *shm_low  = 0;
+
     fd = open("/dev/led0", O_RDWR);
     if (fd < 0) {
         printf("Failed to open /dev/led0, fd=%d\n", fd);
+        shared_free(shm_high); shared_free(shm_low);
         return -1;
     }
 
-    for (int i = 0; i < cycles; i++) {
-        write(fd, &high, 1);
+    for (i = 0; i < cycles; i++) {
+        write(fd, shm_high, 1);
         delay(500);
-        write(fd, &low, 1);
+        write(fd, shm_low, 1);
         delay(500);
     }
 
-    write(fd, &low, 1);
+    write(fd, shm_low, 1);
     close(fd);
+    shared_free(shm_high); shared_free(shm_low);
     printf("LED test completed\n");
     return 0;
 }
@@ -811,20 +833,27 @@ static int test_key0(void)
     int fd;
     int last_state = -1;
     int elapsed_ms = 0;
-    char value = 0;
+    char *shm_value = (char *)PUP_NULL;
 
     printf("\n=== KEY0 Test (PC5) ===\n");
     printf("Reading /dev/key0 for 5 seconds...\n");
 
+    shm_value = (char *)shared_malloc(1);
+    if (!shm_value) {
+        printf("shared_malloc failed\n");
+        return -1;
+    }
+
     fd = open("/dev/key0", O_RDONLY);
     if (fd < 0) {
         printf("Failed to open /dev/key0, fd=%d\n", fd);
+        shared_free(shm_value);
         return -1;
     }
 
     while (elapsed_ms < 5000) {
-        if (read(fd, &value, 1) > 0) {
-            int state = value ? 1 : 0;
+        if (read(fd, shm_value, 1) > 0) {
+            int state = *shm_value ? 1 : 0;
             if (state != last_state) {
                 printf("[key0] t=%dms, state=%d (%s)\n", elapsed_ms, state,
                        state ? "released" : "pressed");
@@ -837,6 +866,7 @@ static int test_key0(void)
     }
 
     close(fd);
+    shared_free(shm_value);
     printf("KEY0 test completed\n");
     return 0;
 }
@@ -977,10 +1007,13 @@ static int test_spi_flash_id(void)
 {
     int fd;
     int ret;
-    pup_spi_slave_config_t slave;
-    pup_spi_transfer_t xfer;
-    uint8_t tx[4] = {0x9F, 0xFF, 0xFF, 0xFF};
-    uint8_t rx[4] = {0};
+    void *shm_slave = PUP_NULL;       /* shared memory for pup_spi_slave_config_t */
+    void *shm_xfer = PUP_NULL;        /* shared memory for [xfer][tx][rx] layout */
+    pup_spi_slave_config_t *slave;
+    pup_spi_transfer_t *xfer;
+    unsigned int transfer_len = 4;
+    uint8_t *tx_data;
+    uint8_t *rx_data;
 
     printf("\n=== SPI Flash ID Test ===\n");
 
@@ -990,37 +1023,83 @@ static int test_spi_flash_id(void)
         return -1;
     }
 
-    memset(&slave, 0, sizeof(slave));
-    strcpy(slave.name, "flash0");
-    slave.cs_id = PUP_SPI2_CS0;
-    slave.mode = 0;
-    slave.datasize = 0;
-    slave.baudrate_prescaler = 2;
-    slave.firstbit = 0;
+    /* Allocate slave config in shared memory */
+    shm_slave = shared_malloc(sizeof(pup_spi_slave_config_t));
+    if (!shm_slave) {
+        printf("shared_malloc failed for slave config\n");
+        close(fd);
+        return -1;
+    }
+    slave = (pup_spi_slave_config_t *)shm_slave;
+    memset(slave, 0, sizeof(*slave));
+    strcpy(slave->name, "flash0");
+    slave->cs_id = PUP_SPI2_CS0;
+    slave->mode = 0;
+    slave->datasize = 0;
+    slave->baudrate_prescaler = 2;
+    slave->firstbit = 0;
 
-    ret = ioctl(fd, PUP_SPI_IOCTL_REGISTER_SLAVE, &slave);
+    ret = ioctl(fd, PUP_SPI_IOCTL_REGISTER_SLAVE, shm_slave);
     if (ret != 0) {
         printf("Register SPI slave failed, ret=%d\n", ret);
+        shared_free(shm_slave);
         close(fd);
         return -1;
     }
 
-    memset(&xfer, 0, sizeof(xfer));
-    xfer.slave_id = slave.slave_id;
-    xfer.tx_buf = tx;
-    xfer.rx_buf = rx;
-    xfer.len = sizeof(tx);
+    /*
+     * Allocate contiguous shared memory for SPI TRANSFER:
+     *   [pup_spi_transfer_t][tx_data[len]][rx_space[len]]
+     */
+    {
+        unsigned int xfer_size = sizeof(pup_spi_transfer_t);
+        unsigned int total_size = xfer_size + transfer_len * 2U;
 
-    ret = ioctl(fd, PUP_SPI_IOCTL_TRANSFER, &xfer);
+        shm_xfer = shared_malloc(total_size);
+        if (!shm_xfer) {
+            printf("shared_malloc failed for xfer (%u bytes)\n", total_size);
+            shared_free(shm_slave);
+            close(fd);
+            return -1;
+        }
+        memset(shm_xfer, 0, total_size);
+
+        xfer    = (pup_spi_transfer_t *)shm_xfer;
+        tx_data = (uint8_t *)((char *)shm_xfer + xfer_size);
+        rx_data = (uint8_t *)((char *)shm_xfer + xfer_size + transfer_len);
+
+        xfer->slave_id = slave->slave_id;
+        xfer->tx_buf   = (const uint8_t *)tx_data;
+        xfer->rx_buf   = rx_data;
+        xfer->len      = transfer_len;
+
+        /* Fill TX data: JEDEC READ-ID command */
+        tx_data[0] = 0x9F;
+        tx_data[1] = 0xFF;
+        tx_data[2] = 0xFF;
+        tx_data[3] = 0xFF;
+    }
+
+    ret = ioctl(fd, PUP_SPI_IOCTL_TRANSFER, shm_xfer);
     if (ret != 0) {
         printf("SPI transfer failed, ret=%d\n", ret);
+        shared_free(shm_xfer);
+        shared_free(shm_slave);
         close(fd);
         return -1;
     }
 
-    printf("JEDEC ID: %02X %02X %02X (len=%lu)\n",
-           rx[1], rx[2], rx[3], xfer.actual_len);
+    {
+        unsigned int xfer_size = sizeof(pup_spi_transfer_t);
+        uint8_t *rx_out = (uint8_t *)((char *)shm_xfer + xfer_size + transfer_len);
 
+        printf("JEDEC ID: %02X %02X %02X (len=%lu)\n",
+               rx_out[1], rx_out[2], rx_out[3],
+               (unsigned long)xfer->actual_len);
+    }
+
+    shared_free(shm_xfer);
+    shared_free(shm_slave);
     close(fd);
     return 0;
 }
@@ -1132,12 +1211,23 @@ static int test_driver_chain(void)
     int fd_gpio = -1;
     int fd_led = -1;
     int fd_key = -1;
-    int dir = 0;
-    int val = 0;
-    char key_val = 0;
-    volatile unsigned int *exti_swier = (volatile unsigned int *)0x40013C10U;
+    void *shm_dir = PUP_NULL;     /* shared memory for ioctl arg */
+    void *shm_val = PUP_NULL;     /* shared memory for ioctl arg */
+    char *shm_key = (char *)PUP_NULL;  /* shared memory for key read value */
 
     printf("\n=== User-Mode GPIO Driver Chain Test ===\n");
+
+    /* Pre-allocate shared memory buffers for ioctl args and read buffer */
+    shm_dir = shared_malloc(sizeof(int));
+    shm_val = shared_malloc(sizeof(int));
+    shm_key = (char *)shared_malloc(1);
+    if (!shm_dir || !shm_val || !shm_key) {
+        printf("[driver] shared_malloc failed\n");
+        if (shm_dir) shared_free(shm_dir);
+        if (shm_val) shared_free(shm_val);
+        if (shm_key) shared_free(shm_key);
+        return -1;
+    }
 
     fd_gpio = open("/dev/gpio0", O_RDWR);
     fd_led = open("/dev/led0", O_RDWR);
@@ -1145,55 +1235,57 @@ static int test_driver_chain(void)
 
     if (fd_gpio < 0 || fd_led < 0 || fd_key < 0) {
         printf("[driver] open failed: gpio=%d led=%d key=%d\n", fd_gpio, fd_led, fd_key);
-        if (fd_gpio >= 0) close(fd_gpio);
-        if (fd_led >= 0) close(fd_led);
-        if (fd_key >= 0) close(fd_key);
+        close(fd_gpio); close(fd_led); close(fd_key);
+        shared_free(shm_dir); shared_free(shm_val); shared_free(shm_key);
         return -1;
     }
 
-    dir = 1;
-    if (ioctl(fd_gpio, 0x2001, &dir) < 0) {
+    *(int *)shm_dir = 1;
+    if (ioctl(fd_gpio, 0x2001, shm_dir) < 0) {
         printf("[driver] gpio set dir failed\n");
         goto fail;
     }
 
-    dir = -1;
-    if (ioctl(fd_gpio, 0x2002, &dir) < 0) {
+    *(int *)shm_dir = -1;
+    if (ioctl(fd_gpio, 0x2002, shm_dir) < 0) {
         printf("[driver] gpio get dir failed\n");
         goto fail;
     }
-    printf("[driver] gpio dir=%d\n", dir);
+    printf("[driver] gpio dir=%d\n", *(int *)shm_dir);
 
-    val = 1;
-    if (ioctl(fd_led, 0x2003, &val) < 0) {
+    *(int *)shm_val = 1;
+    if (ioctl(fd_led, 0x2003, shm_val) < 0) {
         printf("[driver] led set value=1 failed\n");
         goto fail;
     }
     delay(100);
 
-    val = 0;
-    if (ioctl(fd_led, 0x2003, &val) < 0) {
+    *(int *)shm_val = 0;
+    if (ioctl(fd_led, 0x2003, shm_val) < 0) {
         printf("[driver] led set value=0 failed\n");
         goto fail;
     }
 
-    if (read(fd_key, &key_val, 1) <= 0) {
+    if (read(fd_key, shm_key, 1) <= 0) {
         printf("[driver] key read failed\n");
         goto fail;
     }
 
     printf("[driver] key0 value=%d (%s)\n",
-           key_val ? 1 : 0,
-           key_val ? "released" : "pressed");
+           *shm_key ? 1 : 0,
+           *shm_key ? "released" : "pressed");
 
-        /* Trigger EXTI line5 by software to validate key0 IRQ bridge path. */
-        *exti_swier |= (1U << 5);
-        delay(20);
-        printf("[driver] key0 SW interrupt triggered (EXTI line5)\n");
+    { volatile unsigned int *exti_swier = (volatile unsigned int *)0x40013C10U;
+      *exti_swier |= (1U << 5); }
+    delay(20);
+    printf("[driver] key0 SW interrupt triggered (EXTI line5)\n");
 
     close(fd_gpio);
     close(fd_led);
     close(fd_key);
+    shared_free(shm_dir);
+    shared_free(shm_val);
+    shared_free(shm_key);
     printf("[driver] chain test completed\n");
     return 0;
 
@@ -1201,6 +1293,9 @@ fail:
     close(fd_gpio);
     close(fd_led);
     close(fd_key);
+    shared_free(shm_dir);
+    shared_free(shm_val);
+    shared_free(shm_key);
     return -1;
 }
 

@@ -1,8 +1,11 @@
-MEMORY
-{
-    USER_APP_ROM (rx) : ORIGIN = 0x08080000, LENGTH = 512k
-    USER_APP_RAM (rw) : ORIGIN = 0x20010000, LENGTH = 64k
-}
+/* puppy-next user app linker script
+ * Base address = 0 for simplified relocation.
+ *
+ * Layout (all virtual, linked from 0):
+ *   .text  (ro)  — code + rodata + .rel.dyn + app_header
+ *   .data  (rw)  — GOT at head, then .data proper, then .app_runtime, then .stack
+ *   .bss   (rw)  — zero-init
+ */
 ENTRY(app_main)
 
 __user_app_stack_size = DEFINED(__user_app_stack_size) ? __user_app_stack_size : 0x2000;
@@ -17,7 +20,7 @@ SECTIONS
         __text_start__ = .;
         KEEP(*(.app_header))
         . = ALIGN(4);
-    } > USER_APP_ROM
+    }
 
     .text :
     {
@@ -27,7 +30,7 @@ SECTIONS
         *(.text.*)
         . = ALIGN(4);
         _etext = .;
-    } > USER_APP_ROM
+    }
 
     .rodata :
     {
@@ -35,41 +38,45 @@ SECTIONS
         *(.rodata)
         *(.rodata*)
         . = ALIGN(4);
-    } > USER_APP_ROM
+    }
 
-    .got_rom :
-    {
-        . = ALIGN(4);
-        __got_start__ = .;
-        *(.got)
-        *(.got.plt)
-        . = ALIGN(4);
-        __got_end__ = .;
-    } > USER_APP_ROM
-
+    /* .rel.dyn placed at end of ROM section.
+     * Collects .rel.dyn for all RELATIVE relocations (GOT + non-GOT .data).
+     * Uses ADDR+SIZEOF because the PIE linker may append extra entries
+     * after the explicit input patterns. */
     .rel.dyn :
     {
+        . = ALIGN(4);
+        __rel_start__ = .;
         *(.rel.dyn .rel.data .rel.data.* .rel.gnu.linkonce.d.*)
-    } > USER_APP_ROM
+        . = ALIGN(4);
+    }
 
-    __rel_start__ = ADDR(.rel.dyn);
     __rel_end__ = ADDR(.rel.dyn) + SIZEOF(.rel.dyn);
 
-    _end_of_rom = .;
-
-    .data : AT (_end_of_rom)
+    /* .data follows .rel.dyn in the binary image (VMA == LMA).
+     * GOT is placed at the head of .data. */
+    .data :
     {
         . = ALIGN(4);
         __data_start__ = .;
         _sdata = .;
+
+        __got_start__ = .;
+        *(.got)
+        *(.got.plt)
+        __got_end__ = .;
+        . = ALIGN(4);
+
         *(.data)
         *(.data.*)
         . = ALIGN(4);
         __data_end__ = .;
         _edata = .;
-    } > USER_APP_RAM
+    }
 
-    __data_load__ = LOADADDR(.data);
+    /* data_load == data_start since VMA == LMA (no AT directive) */
+    __data_load__ = __data_start__;
 
     .bss :
     {
@@ -82,7 +89,7 @@ SECTIONS
         . = ALIGN(4);
         __bss_end__ = .;
         _ebss = .;
-    } > USER_APP_RAM
+    }
 
     .app_runtime :
     {
@@ -91,7 +98,7 @@ SECTIONS
         . = . + __user_app_arg_size;
         __app_arg_end__ = .;
         . = ALIGN(8);
-    } > USER_APP_RAM
+    }
 
     .stack :
     {
@@ -99,12 +106,14 @@ SECTIONS
         _sstack = .;
         . = . + __user_app_stack_size;
         _estack = .;
-    } > USER_APP_RAM
+    }
+
+    PROVIDE(__ram_size__ = _estack - __data_start__);
 
     .app_end :
     {
         . = ALIGN(4);
         _app_end = .;
         _app_size = _app_end - _app_start;
-    } > USER_APP_ROM
+    }
 }

@@ -55,7 +55,7 @@ Borrowing value:
 
 ### 3.4 App memory metadata exposure
 
-MoM app header includes `ram_size`, `heap_offset`, `stack_offset`, `data_offset`.
+RT-Thread LWP app header includes `ram_size`, `heap_offset`, `stack_offset`, `data_offset`.
 
 Borrowing value:
 - Keep kernel truth from app process metadata.

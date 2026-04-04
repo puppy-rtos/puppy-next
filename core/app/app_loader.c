@@ -13,145 +13,79 @@
 static volatile int user_app_exit_code = 0;
 static volatile int user_app_should_exit = 0;
 
-static unsigned int relocate_runtime_address(unsigned int value,
-                                             unsigned int gs, unsigned int ge,
-                                             unsigned int ts, unsigned int tbase,
-                                             unsigned int ram_start, unsigned int ram_end,
-                                             unsigned int runtime_ram_base,
-                                             unsigned int runtime_got_base)
-{
-    if (value >= gs && value < ge)
-    {
-        return runtime_got_base + (value - gs);
-    }
-
-    if (value >= ram_start && value < ram_end)
-    {
-        return runtime_ram_base + (value - ram_start);
-    }
-
-    if (value >= ts)
-    {
-        return tbase + (value - ts);
-    }
-
-    return value;
-}
-
-static unsigned int *resolve_runtime_pointer(unsigned int address,
-                                             unsigned int gs, unsigned int ge,
-                                             unsigned int ts, unsigned int tbase,
-                                             unsigned int ram_start, unsigned int ram_end,
-                                             unsigned int runtime_ram_base,
-                                             unsigned int runtime_got_base)
-{
-    if (address >= gs && address < ge)
-    {
-        return (unsigned int *)(runtime_got_base + (address - gs));
-    }
-
-    if (address >= ram_start && address < ram_end)
-    {
-        return (unsigned int *)(runtime_ram_base + (address - ram_start));
-    }
-
-    if (address >= ts)
-    {
-        /*
-         * Do not write relocations back to the flash image (.text/.rodata/
-         * app header). Writing there would mutate the on-flash app metadata,
-         * causing subsequent launches to parse corrupted header fields.
-         */
-        return NULL;
-    }
-
-    if (address >= PUP_RAM_ADDRESS_START && address < PUP_RAM_ADDRESS_END)
-    {
-        return (unsigned int *)address;
-    }
-
-    return NULL;
-}
-
-void kernel_reloc(unsigned int *gbase, unsigned int tbase, 
+/* Relocation for base-0 linked apps.
+ * With -mno-pic-data-is-text-relative, GOT values are either:
+ *   - offset from GOT start (>= gs)  → data/GOT relative
+ *   - offset from text start (< gs)  → text relative
+ * .rel.dyn (from *(.rel.dyn ...)) may contain entries targeting both
+ * GOT and non-GOT .data; GOT-range entries are skipped since the
+ * GOT loop already relocated them.
+ */
+void kernel_reloc(unsigned int *got_base, unsigned int text_base,
                   unsigned int gs, unsigned int ge, unsigned int ts,
-                  unsigned int ram_start, unsigned int ram_end,
-                  unsigned int runtime_ram_base,
                   unsigned int *rel_start, unsigned int *rel_end)
 {
     int i;
-    unsigned int s;
-    unsigned int got_base_loaded = (unsigned int)gbase;
-    unsigned int got_end_loaded = got_base_loaded + (ge - gs);
+    unsigned int s, offset;
 
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "gbase=0x%08x, tbase=0x%08x", (unsigned int)gbase, tbase);
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "gs=0x%08x, ge=0x%08x, ts=0x%08x", gs, ge, ts);
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "GOT loaded range: 0x%08x - 0x%08x", got_base_loaded, got_end_loaded);
-    
-    if (rel_start && rel_end && rel_end > rel_start)
-    {
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Processing .rel.dyn segment...");
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "rel_start=0x%08x, rel_end=0x%08x", 
-                   (unsigned int)rel_start, (unsigned int)rel_end);
-        
-        for (i = 0; i < (int)((rel_end - rel_start) / 2); i++)
-        {
-            unsigned int rel_addr = rel_start[i * 2];
-            unsigned int rel_type = rel_start[i * 2 + 1];
-            
-            if (rel_type == 0x00000017)
-            {
-                unsigned int *pointer;
-                unsigned int value;
-                
-                if (rel_addr >= gs && rel_addr < ge)
-                {
-                    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "SKIP GOT entry at 0x%08x (will be handled by GOT reloc)", rel_addr);
-                    continue;
-                }
-                pointer = resolve_runtime_pointer(rel_addr,
-                                                 gs, ge,
-                                                 ts, tbase,
-                                                 ram_start, ram_end,
-                                                 runtime_ram_base,
-                                                 got_base_loaded);
-                if (!pointer)
-                {
-                    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Skip unsupported reloc pointer 0x%08x", rel_addr);
-                    continue;
-                }
-                
-                value = *pointer;
-                
-                PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Relocating pointer at 0x%08x (value=0x%08x)", 
-                           (unsigned int)pointer, value);
-                
-                *pointer = relocate_runtime_address(value,
-                                                    gs, ge,
-                                                    ts, tbase,
-                                                    ram_start, ram_end,
-                                                    runtime_ram_base,
-                                                    got_base_loaded);
-            }
-        }
-        
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, ".rel.dyn relocation completed, %d entries processed", i);
-    }
-    
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Performing GOT relocation...");
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "kernel_reloc: got_base=0x%08x text_base=0x%08x",
+                  (unsigned int)got_base, text_base);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "  gs=0x%08x ge=0x%08x ts=0x%08x",
+                  gs, ge, ts);
+
+    /* GOT relocation (two-branch) */
     for (i = 0, s = gs; s < ge; s += 4, i++)
     {
-        unsigned int value = gbase[i];
-
-        gbase[i] = relocate_runtime_address(value,
-                                            gs, ge,
-                                            ts, tbase,
-                                            ram_start, ram_end,
-                                            runtime_ram_base,
-                                            got_base_loaded);
+        if (got_base[i] >= gs)
+        {
+            offset = got_base[i] - gs;
+            got_base[i] = offset + (unsigned int)got_base;
+        }
+        else
+        {
+            offset = got_base[i] - ts;
+            got_base[i] = offset + text_base;
+        }
     }
-    
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "GOT relocation completed, %d entries processed", i);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "GOT reloc done, %d entries", (int)(ge - gs) / 4);
+
+    /* .rel.dyn relocation (two-branch, skip GOT-range entries
+     * because GOT loop above already relocated them) */
+    if (rel_start && rel_end && rel_end > rel_start)
+    {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Processing .rel.dyn (%d entries)",
+                      (int)((rel_end - rel_start) / 2));
+        for (i = 0, s = (unsigned int)rel_start;
+             s < (unsigned int)rel_end;
+             s += 8, i += 2)
+        {
+            unsigned int rel_addr = rel_start[i];
+            unsigned int rel_type = rel_start[i + 1];
+
+            if ((rel_type & 0xff) != 0x17) /* R_ARM_RELATIVE */
+                continue;
+
+            /* Skip GOT-range entries — already handled by GOT loop above */
+            if (rel_addr >= gs && rel_addr < ge)
+                continue;
+
+            /* Point to the location to relocate (in .data, non-GOT) */
+            offset = rel_addr - gs;
+            unsigned int *pointer = (unsigned int *)((unsigned int)got_base + offset);
+
+            if (*pointer >= gs)
+            {
+                offset = *pointer - gs;
+                *pointer = offset + (unsigned int)got_base;
+            }
+            else
+            {
+                offset = *pointer - ts;
+                *pointer = offset + text_base;
+            }
+        }
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, ".rel.dyn reloc done");
+    }
 }
 
 static unsigned int app_mpu_choose_region_size(unsigned int app_base, unsigned int app_size)
@@ -221,8 +155,6 @@ static int app_validate(void* flash_addr, pup_size_t size) {
 int app_calc_memory_requirement(void* flash_addr, pup_size_t size, unsigned int* required_size) {
     app_header_t* header = (app_header_t*)flash_addr;
     unsigned int ram_image_size;
-    unsigned int got_size;
-    unsigned int total_size;
 
     if (!required_size) {
         return -1;
@@ -249,15 +181,13 @@ int app_calc_memory_requirement(void* flash_addr, pup_size_t size, unsigned int*
     }
 
     ram_image_size = (header->stack_addr + header->stack_size) - header->data_start;
-    got_size = (header->got_end > header->got_start) ? (header->got_end - header->got_start) : 0;
-    total_size = ram_image_size + got_size;
 
-    if (total_size == 0) {
+    if (ram_image_size == 0) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App memory requirement is zero");
         return -1;
     }
 
-    *required_size = (unsigned int)ALIGN_UP(total_size, 8);
+    *required_size = (unsigned int)ALIGN_UP(ram_image_size, 8);
     return 0;
 }
 
@@ -269,9 +199,6 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     unsigned int data_size;
     unsigned int bss_size;
     unsigned int ram_image_size;
-    unsigned int got_size;
-    unsigned int runtime_got_base;
-    unsigned int *got_base;
     unsigned int *rel_start = NULL;
     unsigned int *rel_end = NULL;
     
@@ -301,15 +228,17 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
         return -1;
     }
 
+    /* With base-0 linking, flash_addr == load_addr (both are offsets).
+     * load_offset = flash_addr - header->load_addr adjusts for any
+     * discrepancy between the actual flash location and link address. */
     load_offset = (unsigned int)flash_addr - header->load_addr;
     data_size = (header->data_end > header->data_start) ? (header->data_end - header->data_start) : 0;
     bss_size = (header->bss_end > header->bss_start) ? (header->bss_end - header->bss_start) : 0;
     ram_image_size = (header->stack_addr + header->stack_size) - header->data_start;
-    got_size = (header->got_end > header->got_start) ? (header->got_end - header->got_start) : 0;
 
-    if (ram_image_size > ram_size || ram_image_size + got_size > ram_size) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App RAM image too large: image=%u got=%u slot=%u",
-                      ram_image_size, got_size, ram_size);
+    if (ram_image_size > ram_size) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "App RAM image too large: image=%u slot=%u",
+                      ram_image_size, ram_size);
         return -1;
     }
 
@@ -329,45 +258,39 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     app->got_start = header->got_start;
     app->got_end = header->got_end;
     app->text_start = header->text_start;
-    app->got_base = 0;
+    /* GOT is inside .data now — runtime GOT base is ram_base + (got_start - data_start) */
+    app->got_base = ram_base + (header->got_start - header->data_start);
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App loaded from flash: 0x%08x", (unsigned int)flash_addr);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Stack addr: 0x%08x, size: %u", header->stack_addr, header->stack_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Arg area: 0x%08x - 0x%08x, size=%u",
                   header->arg_start, header->arg_end, app->arg_size);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Load offset: 0x%08x", load_offset);
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "GOT runtime base (r9): 0x%08x", app->got_base);
     
     /* Calculate app actual memory usage (not the allocated size)
      * ram_image_size is the actual app RAM usage including stack */
     uint32_t app_actual_size = ram_image_size;
     uint32_t app_actual_end = ram_base + app_actual_size;  /* Actual end, NOT aligned */
     
-    /* Calculate precise MPU configuration using two overlapping regions
-     * - Front region: aligned to 32KB, covers app start
-     * - Back region: aligned to 32KB based on app_end, can overlap with front
-     * - Two regions overlap to precisely cover app actual range [ram_base, app_actual_end)
-     * - app_actual_end is the ACTUAL end (not aligned), only ram_base is aligned
-     */
+    /* Calculate precise MPU configuration using two overlapping regions */
     uint32_t region_size = app_mpu_choose_region_size(ram_base, app_actual_size);
     uint32_t subregion_size = region_size / 8;
     uint32_t f_base = ram_base & ~(region_size - 1);
     uint32_t b_base = (app_actual_end - 1) & ~(region_size - 1);
     int b_region_enabled = (b_base != f_base);
     
-    /* Calculate front sub-region mask
-     * Enable sub-regions that overlap with [ram_base, app_actual_end) */
     uint32_t f_sub_mask = 0;
     char f_sub_map[9] = {0};
     for (int i = 0; i < 8; i++) {
         uint32_t subregion_start = f_base + i * subregion_size;
         uint32_t subregion_end = subregion_start + subregion_size;
-        /* Overlap condition: subregion_start < app_actual_end AND subregion_end > ram_base */
         int overlaps = (subregion_start < app_actual_end) && (subregion_end > ram_base);
         if (!overlaps) {
             f_sub_mask |= (1 << i);
-            f_sub_map[i] = (subregion_end <= ram_base) ? 'x' : 'X';  /* x=before, X=after */
+            f_sub_map[i] = (subregion_end <= ram_base) ? 'x' : 'X';
         } else {
-            f_sub_map[i] = 'o';  /* Enabled */
+            f_sub_map[i] = 'o';
         }
     }
     f_sub_map[8] = '\0';
@@ -394,7 +317,6 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     }
     b_sub_map[8] = '\0';
 
-    /* Print app memory layout and precise MPU configuration */
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "=== App Memory Layout ===");
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  RAM:   0x%08x - 0x%08x (%d bytes, allocated)",
                  ram_base, ram_base + ram_size, ram_size);
@@ -426,6 +348,7 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  [ALLOW] Flash:    0x%08x - 0x%08x (RX)", 0x08000000, 0x08100000);
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "  [DENY]  Kernel:   0x%08x - 0x%08x (Privileged only)", 0x20000000, 0x20010000);
     
+    /* Copy .data segment (which includes GOT at its head) from flash to RAM */
     if (data_size > 0) {
         PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Initializing .data segment...");
         PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "data_start=0x%08x, data_end=0x%08x, data_load=0x%08x", 
@@ -461,27 +384,20 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
         }
     }
     
-    if (got_size > 0) {
-        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Performing GOT relocation...");
+    /* Perform relocation — GOT is already in RAM (inside .data) */
+    if (header->got_end > header->got_start) {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Performing relocation...");
         PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "App actual load addr: 0x%08x", (unsigned int)flash_addr);
         PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "App compiled load addr: 0x%08x", header->load_addr);
-        
-        runtime_got_base = ram_base + ram_image_size;
-        got_base = (unsigned int*)runtime_got_base;
-        libcm_memcpy(got_base,
-                     (const void *)((unsigned int)flash_addr + (header->got_start - header->load_addr)),
-                     got_size);
-        app->got_base = runtime_got_base;
         
         if (header->rel_start != 0 && header->rel_end != 0 && header->rel_end > header->rel_start) {
             rel_start = (unsigned int*)((unsigned int)flash_addr + (header->rel_start - header->load_addr));
             rel_end = (unsigned int*)((unsigned int)flash_addr + (header->rel_end - header->load_addr));
         }
         
-        kernel_reloc(got_base, (unsigned int)flash_addr,
+        kernel_reloc((unsigned int *)app->got_base,
+                     (unsigned int)flash_addr,
                      header->got_start, header->got_end, header->text_start,
-                     header->data_start, header->stack_addr + header->stack_size,
-                     ram_base,
                      rel_start, rel_end);
 
         PUP_LOG_DEBUG(PUP_LOG_MODULE_RELOC, "Adjusted entry: 0x%08x", (unsigned int)app->entry);
@@ -504,28 +420,19 @@ static void* user_app_thread(void* arg) {
     user_app_should_exit = 0;
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up dynamic MPU protection for app");
-    /* Setup MPU protection based on the actual runtime span used by
-     * image + GOT + argument area. This keeps fine-grained protection
-     * while avoiding faults on valid runtime metadata access. */
+    /* GOT is inside .data, so compiled_ram_end already covers it */
     uint32_t protected_end = app->ram_base + (app->compiled_ram_end - app->compiled_ram_start);
-    uint32_t got_size = (app->got_end > app->got_start) ? (app->got_end - app->got_start) : 0;
-    uint32_t app_actual_size;
+    uint32_t app_actual_size = protected_end - app->ram_base;
 
-    if (app->got_base != 0 && got_size > 0) {
-        uint32_t got_end = app->got_base + got_size;
-        if (got_end > protected_end) {
-            protected_end = got_end;
-        }
-    }
-
+    /* Extend protection to cover arg area if it's beyond compiled_ram_end */
     if (app->entry_arg != NULL && app->arg_size > 0) {
         uint32_t arg_end = (uint32_t)app->entry_arg + app->arg_size;
         if (arg_end > protected_end) {
             protected_end = arg_end;
+            app_actual_size = protected_end - app->ram_base;
         }
     }
 
-    app_actual_size = protected_end - app->ram_base;
     pup_mpu_setup_app_protection(app->ram_base, app_actual_size);
     
     extern void user_app_start(unsigned int got_base, void* entry, void* entry_arg);

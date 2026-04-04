@@ -19,7 +19,7 @@ extern int __app_arg_end__;
 __attribute__((section(".app_header")))
 app_header_t app_header = {
     .magic = APP_HEADER_MAGIC,
-    .load_addr = 0x08080000,
+    .load_addr = 0x00000000,
     .entry_addr = (unsigned int)app_main,
     .app_size = 0,
     .version = 0x00020000,

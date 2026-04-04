@@ -56,10 +56,8 @@ int app_load_into_memory(void* flash_addr, pup_size_t size,
                          user_app_t* app);
 int app_run(user_app_t* app, const char* thread_name, pthread_t* thread_out);
 
-void kernel_reloc(unsigned int *gbase, unsigned int tbase, 
+void kernel_reloc(unsigned int *got_base, unsigned int text_base,
                   unsigned int gs, unsigned int ge, unsigned int ts,
-                  unsigned int ram_start, unsigned int ram_end,
-                  unsigned int runtime_ram_base,
                   unsigned int *rel_start, unsigned int *rel_end);
 
 #endif

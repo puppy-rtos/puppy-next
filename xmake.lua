@@ -124,22 +124,23 @@ end
 
 define_user_app_target("hello", {
     sources = {"apps/apps/hello/main.c"},
-    output = "hello.bin"
+    output = "hello.bin",
+    stack_size = "0x800"
 })
 define_user_app_target("shell", {
     sources = {"apps/apps/shell/main.c"},
     output = "shell.bin",
-    stack_size = "0x1000"
+    stack_size = "0x800"
 })
 define_user_app_target("test", {
     sources = {"apps/apps/test/main.c"},
     output = "test.bin",
-    stack_size = "0x1000"
+    stack_size = "0x800"
 })
 define_user_app_target("mpu_test", {
     sources = {"apps/apps/mpu_test/main.c"},
     output = "mpu_test.bin",
-    stack_size = "0x1000"
+    stack_size = "0x800"
 })
 define_user_app_target("driver", {
     sources = {
@@ -158,7 +159,7 @@ define_user_app_target("driver", {
         "apps/apps/driver/dtm/chips/stm32f407"
     },
     output = "driver.bin",
-    stack_size = "0x1000"
+    stack_size = "0x800"
 })
 
 target("firmware")

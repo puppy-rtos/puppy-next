@@ -343,6 +343,102 @@ static void dump_contex(struct stack_frame* context) {
     PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, " pc: 0x%08x", context->esf.pc);
 }
 
+#define BT_MAX_DEPTH  16
+
+static void arch_stack_backtrace(struct stack_frame *context, app_process_t *app)
+{
+    pup_uint32_t addrs[BT_MAX_DEPTH];
+    int depth = 0;
+    int i;
+
+    pup_uint32_t load_offset = 0;
+    if (app && app->flash_addr) {
+        app_header_t *hdr = (app_header_t *)app->flash_addr;
+        load_offset = app->flash_addr - hdr->load_addr;
+    }
+
+    /* 1) exception frame 中的 PC 和 LR 是最可靠的起始点 */
+    pup_uint32_t pc = context->esf.pc & ~1U;
+    pup_uint32_t lr = context->esf.lr & ~1U;
+
+    if (pc != 0 && depth < BT_MAX_DEPTH)
+        addrs[depth++] = pc;
+    if (lr != 0 && lr != pc && depth < BT_MAX_DEPTH)
+        addrs[depth++] = lr;
+
+    /* 2) 基于 r7 帧指针链遍历，补充更深层的调用栈 */
+    {
+        pup_uint32_t r7 = context->r7;
+        for (i = 0; i < BT_MAX_DEPTH && r7 != 0 && depth < BT_MAX_DEPTH; i++) {
+            /* 栈边界检查 */
+            if (app && app->stack_size > 0) {
+                if (r7 < (pup_uint32_t)app->stack_addr ||
+                    r7 >= ((pup_uint32_t)app->stack_addr + app->stack_size)) {
+                    break;
+                }
+            }
+
+            pup_uint32_t *frame = (pup_uint32_t *)r7;
+            pup_uint32_t prev_r7 = frame[0];
+            pup_uint32_t ret_addr = frame[1] & ~1U;
+
+            if (ret_addr == 0) break;
+            /* 跳过和 PC/LR 重复的地址 */
+            if (ret_addr == pc || ret_addr == lr) {
+                r7 = prev_r7;
+                continue;
+            }
+            /* 只保留属于代码段的地址（flash 范围或内核代码范围），
+             * 过滤掉栈上的 RAM 残留值 */
+            {
+                int valid = 0;
+                if (app && app->flash_size > 0 &&
+                    ret_addr >= (pup_uint32_t)app->flash_addr &&
+                    ret_addr < (pup_uint32_t)app->flash_addr + (pup_uint32_t)app->flash_size) {
+                    valid = 1;
+                }
+                if (!valid && ret_addr >= 0x08000000U && ret_addr < 0x08200000U) {
+                    valid = 1;
+                }
+                if (!valid) {
+                    r7 = prev_r7;
+                    continue;
+                }
+            }
+
+            addrs[depth++] = ret_addr;
+            r7 = prev_r7;
+        }
+    }
+
+    if (depth == 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "=== backtrace: (empty) ===");
+        return;
+    }
+
+    PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "=== backtrace (%d frames) ===", depth);
+
+    for (i = 0; i < depth; i++) {
+        pup_uint32_t raw = addrs[i];
+        pup_uint32_t adjusted = (load_offset && raw > load_offset) ? (raw - load_offset) : raw;
+        const char *tag = (i == 0) ? "pc" : (i == 1 && lr != 0) ? "lr" : "";
+
+        PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH,
+            "  #%d: 0x%08x %s", i, adjusted, tag);
+    }
+
+    /* 单行 addr2line 命令，可直接复制运行 */
+    if (app && app->flash_addr) {
+        libcm_printf("addr2line: arm-none-eabi-addr2line -e %s.elf", app->name);
+        for (i = 0; i < depth; i++) {
+            pup_uint32_t raw = addrs[i];
+            pup_uint32_t adjusted = (raw > load_offset) ? (raw - load_offset) : raw;
+            libcm_printf(" 0x%08x", adjusted);
+        }
+        libcm_printf("\n");
+    }
+}
+
 void arch_hardfault_exception(struct exception_info* exception_info) {
     struct stack_frame* context = &exception_info->stack_frame;
     extern int pup_mpu_setup_kernel_protection(void);
@@ -373,6 +469,7 @@ void arch_hardfault_exception(struct exception_info* exception_info) {
     }
 
     dump_contex(context);
+    arch_stack_backtrace(context, app);
 
     if (app && (exception_info->exc_return & (1 << 2))) {
         PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "User application fault, terminating...");
@@ -473,6 +570,7 @@ void arch_memmanage_exception(struct exception_info* exception_info) {
     }
     
     dump_contex(context);
+    arch_stack_backtrace(context, app);
     
     PUP_LOG_ERROR(PUP_LOG_MODULE_ARCH, "====================================");
     

@@ -20,8 +20,9 @@ local function add_mode_compile_flags()
         add_asflags("-Wa,-g", "-gdwarf-2", "-g")
     elseif is_mode("release") then
         add_defines("NDEBUG")
-        add_cxflags("-O2")
-        add_asflags("-Wa,-g")
+        add_cxflags("-O2", "-gdwarf-2", "-g")
+        add_asflags("-Wa,-g", "-gdwarf-2", "-g")
+        set_strip("none")
     end
 end
 
@@ -88,7 +89,7 @@ function define_user_app_target(target_name, config)
 
         set_arch("cortex-m4")
         set_plat("cross")
-        add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -ffunction-sections -fdata-sections -fno-builtin-printf -fno-builtin-execve')
+        add_cxflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Dgcc -Wall -ffunction-sections -fdata-sections -fno-builtin-printf -fno-builtin-execve -fno-omit-frame-pointer')
         add_cxflags('-fpie -fPIC -msingle-pic-base -mno-pic-data-is-text-relative')
         add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -ffunction-sections -fdata-sections')
         add_mode_compile_flags()

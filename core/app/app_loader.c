@@ -69,6 +69,13 @@ void kernel_reloc(unsigned int *got_base, unsigned int text_base,
             if (rel_addr >= gs && rel_addr < ge)
                 continue;
 
+            /* Skip entries below GOT range — they target .app_header in
+             * flash (read-only metadata used by the loader, not by the
+             * app at runtime).  Processing them would cause an unsigned
+             * underflow in the offset calculation below. */
+            if (rel_addr < gs)
+                continue;
+
             /* Point to the location to relocate (in .data, non-GOT) */
             offset = rel_addr - gs;
             unsigned int *pointer = (unsigned int *)((unsigned int)got_base + offset);
@@ -419,21 +426,26 @@ static void* user_app_thread(void* arg) {
     user_app_exit_code = 0;
     user_app_should_exit = 0;
     
-    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up dynamic MPU protection for app");
-    /* GOT is inside .data, so compiled_ram_end already covers it */
-    uint32_t protected_end = app->ram_base + (app->compiled_ram_end - app->compiled_ram_start);
-    uint32_t app_actual_size = protected_end - app->ram_base;
+    if (pup_mpu_app_isolation_enabled()) {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up isolated MPU protection for app");
+        /* GOT is inside .data, so compiled_ram_end already covers it */
+        uint32_t protected_end = app->ram_base + (app->compiled_ram_end - app->compiled_ram_start);
+        uint32_t app_actual_size = protected_end - app->ram_base;
 
-    /* Extend protection to cover arg area if it's beyond compiled_ram_end */
-    if (app->entry_arg != NULL && app->arg_size > 0) {
-        uint32_t arg_end = (uint32_t)app->entry_arg + app->arg_size;
-        if (arg_end > protected_end) {
-            protected_end = arg_end;
-            app_actual_size = protected_end - app->ram_base;
+        /* Extend protection to cover arg area if it's beyond compiled_ram_end */
+        if (app->entry_arg != NULL && app->arg_size > 0) {
+            uint32_t arg_end = (uint32_t)app->entry_arg + app->arg_size;
+            if (arg_end > protected_end) {
+                protected_end = arg_end;
+                app_actual_size = protected_end - app->ram_base;
+            }
         }
-    }
 
-    pup_mpu_setup_app_protection(app->ram_base, app_actual_size);
+        pup_mpu_setup_app_protection(app->ram_base, app_actual_size);
+    } else {
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Setting up shared MPU user profile for app");
+        pup_mpu_setup_user_protection();
+    }
     
     extern void user_app_start(unsigned int got_base, void* entry, void* entry_arg);
     

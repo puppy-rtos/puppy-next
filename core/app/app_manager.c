@@ -15,10 +15,13 @@
 static app_process_t* g_app_list = NULL;
 static int next_pid = 1;
 app_process_t* current_app_process = NULL;
+#if PUP_MPU_APP_ISOLATION_ENABLED
 static unsigned int g_mpu_cache_version = 1;
+#endif
 
 static int app_exec_internal(const char* name, const char* path, const char* arg, int wait);
 
+#if PUP_MPU_APP_ISOLATION_ENABLED
 static unsigned int app_mpu_choose_region_size(unsigned int app_base, unsigned int app_size) {
     unsigned int region_size = 256;
     unsigned int app_end = app_base + app_size;
@@ -115,6 +118,7 @@ static void app_mpu_prepare_cache(app_process_t* app) {
                  app->mpu_cached_region_size,
                  app->mpu_cached_subregion_size);
 }
+#endif
 
 int app_manager_init(void) {
     g_app_list = NULL;
@@ -123,6 +127,11 @@ int app_manager_init(void) {
     
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App manager initialized (dynamic process table)");
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App memory uses dynamic user heap (aligned=%u)", APP_MEMORY_ALIGN);
+#if PUP_MPU_APP_ISOLATION_ENABLED
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App MPU mode: isolated (per-app cached profile)");
+#else
+    PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "App MPU mode: shared user region");
+#endif
     
     return 0;
 }
@@ -444,6 +453,7 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
         libcm_strncpy((char*)app->app_arg_base, arg, app->image.arg_size - 1);
     }
 
+#if PUP_MPU_APP_ISOLATION_ENABLED
     app_mpu_prepare_cache(app);
 
     {
@@ -458,6 +468,31 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
                      app->mpu_cached_protected_end - app->memory_base,
                      alloc_slack);
     }
+#else
+    {
+        unsigned int used_size = app->image.compiled_ram_end - app->image.compiled_ram_start;
+        if (app->image.arg_size > 0) {
+            unsigned int arg_offset = (app->app_arg_base >= app->memory_base)
+                ? (app->app_arg_base - app->memory_base + app->image.arg_size)
+                : 0;
+            if (arg_offset > used_size) {
+                used_size = arg_offset;
+            }
+        }
+
+        if (used_size > app->memory_size) {
+            used_size = app->memory_size;
+        }
+
+        PUP_LOG_DEBUG(PUP_LOG_MODULE_APP,
+                     "App memory summary(shared): name=%s pid=%d alloc=%u used=%u slack=%u",
+                     app->name,
+                     app->pid,
+                     app->memory_size,
+                     used_size,
+                     app->memory_size - used_size);
+    }
+#endif
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Running app '%s'", name);
 

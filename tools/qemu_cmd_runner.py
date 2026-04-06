@@ -128,7 +128,14 @@ class QemuCmdRunner:
             self.reader_thread.join(timeout=1.0)
 
 
-def run_default_sequence(runner: QemuCmdRunner) -> int:
+def run_default_sequence(runner: QemuCmdRunner, isolation: bool = False) -> int:
+    """Run the default test sequence.
+
+    When ``isolation`` is False (default, PUP_MPU_APP_ISOLATION_ENABLED=0) the
+    per-app MPU profile is not active, so boundary-violation tests are skipped.
+    Pass ``isolation=True`` to enable those tests when the kernel is built with
+    PUP_MPU_APP_ISOLATION_ENABLED=1.
+    """
     steps = [
         {
             "name": "boot prompt",
@@ -142,6 +149,10 @@ def run_default_sequence(runner: QemuCmdRunner) -> int:
             "expects": ["[mpu_test] Self RAM range:", PROMPT],
             "timeout": 8.0,
         },
+    ]
+
+    if isolation:
+        steps += [
         {
             "name": "violate end",
             "command": "/rom/mpu_test violate_end",
@@ -233,6 +244,8 @@ def main() -> int:
     parser.add_argument("--qemu", default=DEFAULT_QEMU, help="Path to qemu-system-arm.exe")
     parser.add_argument("--machine", default=DEFAULT_MACHINE, help="QEMU machine name")
     parser.add_argument("--firmware", default=DEFAULT_FIRMWARE, help="Firmware path relative to repo root")
+    parser.add_argument("--isolation", action="store_true",
+                        help="Enable isolation-mode tests (requires PUP_MPU_APP_ISOLATION_ENABLED=1 build)")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -250,7 +263,7 @@ def main() -> int:
     runner = QemuCmdRunner(args.qemu, args.machine, str(firmware_path))
     try:
         runner.start()
-        ret = run_default_sequence(runner)
+        ret = run_default_sequence(runner, isolation=args.isolation)
         if ret != 0:
             return ret
         return run_switch_stress_sequence(runner)

@@ -89,6 +89,7 @@ int pup_mpu_apply_cached_app_profile(pup_uint32_t region_size,
                                      pup_uint32_t front_sub_mask,
                                      pup_uint32_t back_sub_mask);
 int pup_mpu_isolate_app_region(pup_uint32_t app_ram_base, pup_uint32_t app_ram_size);
+int pup_mpu_app_isolation_enabled(void);
 
 int pup_mpu_setup_app_isolation(pup_uint32_t current_app_base, pup_uint32_t current_app_size,
                                 pup_mpu_app_region_t *other_apps, int other_app_count);

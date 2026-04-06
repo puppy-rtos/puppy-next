@@ -247,6 +247,10 @@ int dtm_mpu_setup_user_protection(void) {
     dtm_mpu_region_set(3, PUP_SHARED_RAM_BASE, PUP_SHARED_RAM_SIZE,
                        DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE | DTM_MPU_ATT_EXEC);
 
+    /* Allow full peripheral MMIO space (0x40000000-0x5FFFFFFF). */
+    dtm_mpu_region_set(4, DTM_MMIO_BASE, DTM_MMIO_SIZE,
+                       DTM_MPU_ATT_READ | DTM_MPU_ATT_WRITE);
+
     dtm_mpu_enable();
 
     return 0;

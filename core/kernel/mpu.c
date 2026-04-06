@@ -43,19 +43,23 @@ void pup_mpu_dump(void) {
 }
 
 int pup_mpu_setup_kernel_protection(void) {
-    int ret = dtm_mpu_setup_kernel_protection();
-    PUP_LOG_INFO(PUP_LOG_MODULE_MPU, "Kernel MPU protection enabled");
-    return ret;
+    return dtm_mpu_setup_kernel_protection();
 }
 
 int pup_mpu_setup_user_protection(void) {
-    int ret = dtm_mpu_setup_user_protection();
-    PUP_LOG_INFO(PUP_LOG_MODULE_MPU, "User MPU protection enabled");
-    return ret;
+    return dtm_mpu_setup_user_protection();
 }
 
 int pup_mpu_setup_app_protection(pup_uint32_t app_ram_base, pup_uint32_t app_ram_size) {
     return dtm_mpu_setup_app_protection(app_ram_base, app_ram_size);
+}
+
+int pup_mpu_app_isolation_enabled(void) {
+#if PUP_MPU_APP_ISOLATION_ENABLED
+    return 1;
+#else
+    return 0;
+#endif
 }
 
 int pup_mpu_apply_cached_app_profile(pup_uint32_t region_size,

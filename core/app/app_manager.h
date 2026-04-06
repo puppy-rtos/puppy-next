@@ -6,7 +6,11 @@
 #include "mpu.h"
 
 #define APP_NAME_MAX_LEN        32
-#define APP_MEMORY_ALIGN        4096  /* Align to 4KB for MPU subregion boundary */
+#if PUP_MPU_APP_ISOLATION_ENABLED
+#define APP_MEMORY_ALIGN        PUP_APP_MEMORY_ALIGN_ISOLATED
+#else
+#define APP_MEMORY_ALIGN        PUP_APP_MEMORY_ALIGN_SHARED
+#endif
 #define APP_STACK_SIZE          (8 * 1024)
 
 #define APP_STATE_IDLE          0

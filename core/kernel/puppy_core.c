@@ -33,6 +33,7 @@ static pup_list_t _g_timeout_list = { &_g_timeout_list, &_g_timeout_list };
 static volatile pup_uint8_t _g_sched_runtime_ready = 0;
 static int _g_active_mpu_pid = -1;
 static unsigned int _g_active_mpu_cache_version = 0;
+static int _g_shared_user_mpu_applied = 0;
 
 pup_tick_t pup_tick_get(void)
 {
@@ -332,36 +333,49 @@ void pup_sched_swap_done_cb(void) {
 
     if (cpu->curr_thread->attr.is_user_thread) {
         next_app = app_find_by_thread((pthread_t)cpu->curr_thread);
-        if (next_app && next_app->mpu_cached_valid) {
-            if (_g_active_mpu_pid != next_app->pid ||
-                _g_active_mpu_cache_version != next_app->mpu_cached_version) {
-                if (pup_mpu_apply_cached_app_profile(next_app->mpu_cached_region_size,
-                                                     next_app->mpu_cached_front_base,
-                                                     next_app->mpu_cached_back_base,
-                                                     next_app->mpu_cached_front_mask,
-                                                     next_app->mpu_cached_back_mask) != 0) {
-                    PUP_LOG_ERROR(PUP_LOG_MODULE_MPU,
-                                  "Failed to apply cached MPU profile: pid=%d ver=%u",
-                                  next_app->pid,
-                                  next_app->mpu_cached_version);
-                } else {
-                    PUP_LOG_DEBUG(PUP_LOG_MODULE_MPU,
-                                  "Applied cached MPU profile: pid=%d ver=%u",
-                                  next_app->pid,
-                                  next_app->mpu_cached_version);
-                    _g_active_mpu_pid = next_app->pid;
-                    _g_active_mpu_cache_version = next_app->mpu_cached_version;
+        if (pup_mpu_app_isolation_enabled()) {
+            if (next_app && next_app->mpu_cached_valid) {
+                if (_g_active_mpu_pid != next_app->pid ||
+                    _g_active_mpu_cache_version != next_app->mpu_cached_version) {
+                    if (pup_mpu_apply_cached_app_profile(next_app->mpu_cached_region_size,
+                                                         next_app->mpu_cached_front_base,
+                                                         next_app->mpu_cached_back_base,
+                                                         next_app->mpu_cached_front_mask,
+                                                         next_app->mpu_cached_back_mask) != 0) {
+                        PUP_LOG_ERROR(PUP_LOG_MODULE_MPU,
+                                      "Failed to apply cached MPU profile: pid=%d ver=%u",
+                                      next_app->pid,
+                                      next_app->mpu_cached_version);
+                    } else {
+                        PUP_LOG_DEBUG(PUP_LOG_MODULE_MPU,
+                                      "Applied cached MPU profile: pid=%d ver=%u",
+                                      next_app->pid,
+                                      next_app->mpu_cached_version);
+                        _g_active_mpu_pid = next_app->pid;
+                        _g_active_mpu_cache_version = next_app->mpu_cached_version;
+                    }
                 }
+                current_app_process = next_app;
+                _g_shared_user_mpu_applied = 0;
+            } else {
+                /* Fallback for non-app user threads to avoid inheriting stale app profile. */
+                pup_mpu_setup_user_protection();
+                _g_active_mpu_pid = -1;
+                _g_active_mpu_cache_version = 0;
+                _g_shared_user_mpu_applied = 1;
+                current_app_process = PUP_NULL;
             }
-            current_app_process = next_app;
         } else {
-            /* Fallback for non-app user threads to avoid inheriting stale app profile. */
-            pup_mpu_setup_user_protection();
+            if (!_g_shared_user_mpu_applied) {
+                pup_mpu_setup_user_protection();
+                _g_shared_user_mpu_applied = 1;
+            }
             _g_active_mpu_pid = -1;
             _g_active_mpu_cache_version = 0;
-            current_app_process = PUP_NULL;
+            current_app_process = next_app;
         }
     } else {
+        _g_shared_user_mpu_applied = 0;
         current_app_process = PUP_NULL;
     }
     

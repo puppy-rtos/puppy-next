@@ -4,7 +4,7 @@
 #include <puppy_core.h>
 
 #define ROMFS_MAGIC        0x524F4D46
-#define ROMFS_MAX_FILES    16
+#define ROMFS_MAX_FILES    32
 #define ROMFS_MAX_NAME_LEN 32
 
 typedef struct {

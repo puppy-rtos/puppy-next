@@ -56,6 +56,12 @@
 
 #define SYS_IRQ_CONTROL      37
 
+#define SYS_USERFS_REGISTER   38
+#define SYS_USERFS_UNREGISTER 39
+#define SYS_USERFS_MOUNT      40
+#define SYS_USERFS_UNMOUNT    41
+#define SYS_USERFS_MKFS       42
+
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 
 long syscall_handler(long syscall_num, long arg1, long arg2, long arg3, long arg4);

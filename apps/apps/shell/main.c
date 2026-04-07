@@ -8,20 +8,6 @@
 #define PUP_SHELL_APP_ARG_LEN  256
 #define PUP_SHELL_HISTORY_MAX  5
 
-#define DT_UNKNOWN              0
-#define DT_DIR                  4
-#define DT_CHR                  2
-
-#define O_RDONLY                0000000
-#define O_DIRECTORY             00200000
-
-struct dirent {
-    unsigned char d_type;
-    unsigned char d_namlen;
-    unsigned short d_reclen;
-    char d_name[256];
-};
-
 typedef int (*shell_cmd_func)(int argc, char **argv);
 
 typedef struct {
@@ -39,18 +25,24 @@ static int shell_cmd_clear(int argc, char **argv);
 static int shell_cmd_apps(int argc, char **argv);
 static int shell_cmd_free(int argc, char **argv);
 static int shell_cmd_exit(int argc, char **argv);
+static int shell_cmd_mount(int argc, char **argv);
+static int shell_cmd_mkfs(int argc, char **argv);
+static int shell_cmd_umount(int argc, char **argv);
 static int shell_build_exec_arg(char **argv, int start, int argc, char *buf, int buf_len);
 
 static const shell_cmd_t shell_cmds[] = {
-    {"help",  "Show available commands", shell_cmd_help},
-    {"ps",    "List all threads", shell_cmd_ps},
-    {"ls",    "List directory (usage: ls [path])", shell_cmd_ls},
-    {"cat",   "Read from file (usage: cat <file>)", shell_cmd_cat},
-    {"echo",  "Write to file (usage: echo <text> > <file>)", shell_cmd_echo},
-    {"clear", "Clear screen", shell_cmd_clear},
-    {"apps",  "List running apps", shell_cmd_apps},
-    {"free",  "Show heap usage", shell_cmd_free},
-    {"exit",  "Exit user shell", shell_cmd_exit},
+    {"help",   "Show available commands", shell_cmd_help},
+    {"ps",     "List all threads", shell_cmd_ps},
+    {"ls",     "List directory (usage: ls [path])", shell_cmd_ls},
+    {"cat",    "Read from file (usage: cat <file>)", shell_cmd_cat},
+    {"echo",   "Write to file (usage: echo <text> > <file>)", shell_cmd_echo},
+    {"clear",  "Clear screen", shell_cmd_clear},
+    {"apps",   "List running apps", shell_cmd_apps},
+    {"free",   "Show heap usage", shell_cmd_free},
+    {"exit",   "Exit user shell", shell_cmd_exit},
+    {"mount",  "Mount filesystem (usage: mount [-t type] <device> <path>)", shell_cmd_mount},
+    {"mkfs",   "Format filesystem (usage: mkfs [-t type] <device>)", shell_cmd_mkfs},
+    {"umount", "Unmount filesystem (usage: umount <path>)", shell_cmd_umount},
 };
 
 #define SHELL_CMD_NUM (sizeof(shell_cmds) / sizeof(shell_cmds[0]))
@@ -365,7 +357,7 @@ static int shell_cmd_echo(int argc, char **argv)
     
     const char *file = argv[redirect_pos + 1];
     
-    int fd = open(file, 0x0002);
+    int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0) {
         printf("Error: Cannot open %s (fd=%d)\n", file, fd);
         return -1;
@@ -433,6 +425,123 @@ static int shell_cmd_exit(int argc, char **argv)
 
     printf("Exiting user shell...\n");
     exit(exit_code);
+    return 0;
+}
+
+static int shell_cmd_mount(int argc, char **argv)
+{
+    const char *fs_type = "lfs";
+    const char *device = NULL;
+    const char *mount_path = NULL;
+    int arg_pos = 1;
+    
+    if (argc == 1) {
+        printf("Usage: mount [-t type] <device> <path>\n");
+        printf("       mount none <path>  (for RAM-based filesystem)\n");
+        printf("Example:\n");
+        printf("  mount /dev/flash0 /data\n");
+        printf("  mount -t lfs /dev/flash0 /data\n");
+        printf("  mount none /tmp\n");
+        return 0;
+    }
+    
+    if (argc > 1 && strcmp(argv[1], "-t") == 0) {
+        if (argc < 5) {
+            printf("Error: -t requires filesystem type\n");
+            printf("Usage: mount -t <type> <device> <path>\n");
+            return -1;
+        }
+        fs_type = argv[2];
+        arg_pos = 3;
+    }
+    
+    if (arg_pos < argc) {
+        device = argv[arg_pos];
+        arg_pos++;
+    }
+    
+    if (arg_pos < argc) {
+        mount_path = argv[arg_pos];
+    }
+    
+    if (!mount_path) {
+        printf("Error: missing mount path\n");
+        return -1;
+    }
+    
+    int ret = userfs_mount(fs_type, device, mount_path, 0);
+    if (ret < 0) {
+        printf("mount failed: %d\n", ret);
+        return -1;
+    }
+    
+    printf("Mounted %s at %s (instance=%d)\n", 
+           device ? device : "RAM", mount_path, ret);
+    return 0;
+}
+
+static int shell_cmd_mkfs(int argc, char **argv)
+{
+    const char *fs_type = "littlefs";
+    const char *device = NULL;
+    int arg_pos = 1;
+    
+    if (argc == 1) {
+        printf("Usage: mkfs [-t type] <device>\n");
+        printf("Example:\n");
+        printf("  mkfs /dev/flash0\n");
+        printf("  mkfs -t littlefs /dev/flash0\n");
+        return 0;
+    }
+    
+    if (argc > 1 && strcmp(argv[1], "-t") == 0) {
+        if (argc < 4) {
+            printf("Error: -t requires filesystem type\n");
+            printf("Usage: mkfs -t <type> <device>\n");
+            return -1;
+        }
+        fs_type = argv[2];
+        arg_pos = 3;
+    }
+    
+    if (arg_pos < argc) {
+        device = argv[arg_pos];
+    }
+    
+    if (!device) {
+        printf("Error: missing device\n");
+        return -1;
+    }
+    
+    printf("Formatting %s...\n", device);
+    
+    int ret = userfs_mkfs(fs_type, device);
+    if (ret < 0) {
+        printf("mkfs failed: %d\n", ret);
+        return -1;
+    }
+    
+    printf("mkfs completed successfully\n");
+    return 0;
+}
+
+static int shell_cmd_umount(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: umount <path>\n");
+        printf("Example: umount /data\n");
+        return -1;
+    }
+    
+    const char *mount_path = argv[1];
+    
+    int ret = userfs_unmount(mount_path);
+    if (ret < 0) {
+        printf("umount failed: %d\n", ret);
+        return -1;
+    }
+    
+    printf("Unmounted %s\n", mount_path);
     return 0;
 }
 

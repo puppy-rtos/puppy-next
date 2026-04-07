@@ -187,6 +187,31 @@ def run_default_sequence(runner: QemuCmdRunner, isolation: bool = False) -> int:
         },
     ]
 
+    steps += [
+        {
+            "name": "start lfs service",
+            "command": "/rom/lfs &",
+            "expects": [
+                "[lfs_service] starting...",
+                "[userfs] service 'lfs' started",
+                PROMPT,
+            ],
+            "timeout": 8.0,
+        },
+        {
+            "name": "userfs test",
+            "command": "/rom/test fs",
+            "expects": [
+                "=== UserFS (lfs) Test ===",
+                "[fs] Mounted lfs at /data",
+                "[fs] PASSED: Data verified",
+                "[fs] UserFS test PASSED",
+                PROMPT,
+            ],
+            "timeout": 15.0,
+        },
+    ]
+
     for step in steps:
         print(f"\n[runner] Step: {step['name']}")
         start_len = runner.snapshot_len()

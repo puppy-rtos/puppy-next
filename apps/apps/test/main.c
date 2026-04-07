@@ -8,22 +8,10 @@
 #define PUP_NULL    ((void*)0)
 #endif
 
-#define O_RDONLY    0000000
-#define O_WRONLY    0000001
-#define O_RDWR      0000002
-#define O_DIRECTORY 00200000
-
 /* App RAM boundaries - aligned to 4KB boundary */
 #define APP_RAM_BASE    0x20011000
 #define APP_RAM_SIZE    28672
 #define APP_RAM_END     (APP_RAM_BASE + APP_RAM_SIZE)
-
-struct dirent {
-    unsigned char d_type;
-    unsigned char d_namlen;
-    unsigned short d_reclen;
-    char d_name[256];
-};
 
 typedef struct {
     const char *name;
@@ -1741,6 +1729,148 @@ static int test_flash_performance(void)
     return 0;
 }
 
+static int test_fs(void)
+{
+    int fd;
+    int ret;
+    char *buf;
+    char *verify_buf;
+    struct dirent entry;
+    int passed = 1;
+    const char *device = "/dev/flash0";
+    int use_flash = 0;
+
+    printf("\n=== UserFS (lfs) Test ===\n");
+
+    buf = (char *)shared_malloc(256);
+    verify_buf = (char *)shared_malloc(256);
+    if (!buf || !verify_buf) {
+        printf("[fs] shared_malloc failed\n");
+        if (buf) shared_free(buf);
+        if (verify_buf) shared_free(verify_buf);
+        return -1;
+    }
+
+    printf("\n--- Test 0: Mount lfs at /data ---\n");
+    fd = open(device, 0);
+    if (fd >= 0) {
+        close(fd);
+        printf("[fs] Found %s, trying to mount flash device\n", device);
+        ret = userfs_mount("lfs", device, "/data", 0);
+        if (ret >= 0) {
+            use_flash = 1;
+            printf("[fs] Mounted lfs on %s at /data, instance=%d\n", device, ret);
+        } else {
+            printf("[fs] Mount %s failed: %d, falling back to RAM\n", device, ret);
+        }
+    }
+    
+    if (!use_flash) {
+        printf("[fs] Using RAM block device\n");
+        ret = userfs_mount("lfs", NULL, "/data", 0);
+        if (ret < 0) {
+            printf("[fs] userfs_mount failed: %d\n", ret);
+            printf("[fs] SKIPPED: UserFS test (mount failed)\n");
+            shared_free(buf);
+            shared_free(verify_buf);
+            return 0;
+        }
+        printf("[fs] Mounted lfs at /data, instance=%d\n", ret);
+    }
+
+    printf("\n--- Test 1: Check /data directory ---\n");
+    fd = open("/data", O_DIRECTORY);
+    if (fd < 0) {
+        printf("[fs] Failed to open /data directory, fd=%d\n", fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+    printf("[fs] Opened /data directory, fd=%d\n", fd);
+    close(fd);
+
+    printf("\n--- Test 2: Create and write file ---\n");
+    fd = open("/data/testfile.txt", O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0) {
+        printf("[fs] Failed to create /data/testfile.txt, fd=%d\n", fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+    printf("[fs] Created /data/testfile.txt, fd=%d\n", fd);
+
+    strcpy(buf, "Hello from UserFS/littlefs!\n");
+    ret = write(fd, buf, strlen(buf));
+    if (ret < 0) {
+        printf("[fs] Write failed, ret=%d\n", ret);
+        close(fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+    printf("[fs] Written %d bytes: \"%s\"\n", ret, buf);
+    close(fd);
+
+    printf("\n--- Test 3: Read file and verify ---\n");
+    fd = open("/data/testfile.txt", O_RDONLY);
+    if (fd < 0) {
+        printf("[fs] Failed to open /data/testfile.txt for reading, fd=%d\n", fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+
+    memset(verify_buf, 0, 256);
+    ret = read(fd, verify_buf, 255);
+    if (ret < 0) {
+        printf("[fs] Read failed, ret=%d\n", ret);
+        close(fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+    verify_buf[ret] = '\0';
+    printf("[fs] Read %d bytes: \"%s\"\n", ret, verify_buf);
+    close(fd);
+
+    if (strcmp(buf, verify_buf) != 0) {
+        printf("[fs] FAILED: Data mismatch!\n");
+        printf("[fs] Expected: \"%s\"\n", buf);
+        printf("[fs] Got: \"%s\"\n", verify_buf);
+        passed = 0;
+    } else {
+        printf("[fs] PASSED: Data verified\n");
+    }
+
+    printf("\n--- Test 4: List /data directory ---\n");
+    fd = open("/data", O_DIRECTORY);
+    if (fd < 0) {
+        printf("[fs] Failed to open /data for listing, fd=%d\n", fd);
+        shared_free(buf);
+        shared_free(verify_buf);
+        return -1;
+    }
+
+    printf("[fs] Directory contents:\n");
+    int file_count = 0;
+    while ((ret = getdents(fd, &entry, sizeof(entry))) > 0) {
+        printf("  [%d] %s (type=%d)\n", file_count, entry.d_name, entry.d_type);
+        file_count++;
+    }
+    close(fd);
+    printf("[fs] Total entries: %d\n", file_count);
+
+    shared_free(buf);
+    shared_free(verify_buf);
+
+    if (passed) {
+        printf("\n[fs] UserFS test PASSED\n");
+    } else {
+        printf("\n[fs] UserFS test FAILED\n");
+    }
+    return passed ? 0 : -1;
+}
+
 static const test_cmd_t test_cmds[] = {
     {"pthread", "Test pthread create and join", test_pthread},
     {"delay", "Test pthread_delay function", test_pthread_delay},
@@ -1748,6 +1878,7 @@ static const test_cmd_t test_cmds[] = {
     {"mpu", "Run MPU comprehensive tests (normal/boundary/protection)", test_mpu_all},
     {"devfs", "Test device file system", test_devfs},
     {"romfs", "Test ROMFS file listing", test_romfs},
+    {"fs", "Test UserFS/littlefs file operations", test_fs},
     {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
     {"key", "Read PC5 key0 status for 5 seconds", test_key0},
     {"sem", "Test named semaphore wait/post/close", test_sem},

@@ -54,6 +54,11 @@
 #define SYS_CHANNEL_REPLY    36
 #define SYS_IRQ_CONTROL      37
 
+#define SYS_USERFS_REGISTER   38
+#define SYS_USERFS_UNREGISTER 39
+#define SYS_USERFS_MOUNT      40
+#define SYS_USERFS_UNMOUNT    41
+
 /* STM32F407 NVIC external IRQ numbers used by user-mode drivers */
 #define PUP_IRQ_EXTI9_5      23
 
@@ -260,6 +265,30 @@ static inline int pup_channel_receive(int channel_id, pup_channel_msg_t *msg) {
  */
 static inline int pup_channel_reply(int channel_id, int cookie, long result) {
     return (int)syscall(SYS_CHANNEL_REPLY, channel_id, cookie, result, 0);
+}
+
+static inline int userfs_register(const char *fs_type, int channel_id) {
+    return (int)syscall(SYS_USERFS_REGISTER, (long)fs_type, channel_id, 0, 0);
+}
+
+static inline int userfs_unregister(const char *fs_type) {
+    return (int)syscall(SYS_USERFS_UNREGISTER, (long)fs_type, 0, 0, 0);
+}
+
+static inline int userfs_mount(const char *fs_type, const char *device,
+                                const char *mount_path, unsigned long flags) {
+    return (int)syscall(SYS_USERFS_MOUNT, (long)fs_type, (long)device,
+                        (long)mount_path, flags);
+}
+
+static inline int userfs_unmount(const char *mount_path) {
+    return (int)syscall(SYS_USERFS_UNMOUNT, (long)mount_path, 0, 0, 0);
+}
+
+#define SYS_USERFS_MKFS         42
+
+static inline int userfs_mkfs(const char *fs_type, const char *device) {
+    return (int)syscall(SYS_USERFS_MKFS, (long)fs_type, (long)device, 0, 0);
 }
 
 #endif

@@ -16,7 +16,7 @@ import struct
 import sys
 
 ROMFS_MAGIC = 0x524F4D46
-ROMFS_MAX_FILES = 16
+ROMFS_MAX_FILES = 32
 ROMFS_MAX_NAME_LEN = 32
 
 

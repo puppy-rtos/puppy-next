@@ -68,7 +68,8 @@ target("puppy")
     add_defines("PUP_MPU_ENABLED")
 
     add_includedirs(
-        "core/dtm/chips/stm32f407"
+        "core/dtm/chips/stm32f407",
+        "core/shared"
     )
 
     after_build(function (target)
@@ -168,13 +169,29 @@ define_user_app_target("driver", {
     output = "driver.bin",
     stack_size = "0x800"
 })
+define_user_app_target("lfs", {
+    sources = {
+        "apps/services/littlefs/main.c",
+        "apps/services/littlefs/lfs_userfs.c",
+        "apps/services/littlefs/lfs.c",
+        "apps/services/littlefs/lfs_util.c",
+        "apps/services/littlefs/lfs_flash_bd.c",
+        "apps/lib/runtime/userfs_service.c"
+    },
+    includes = {
+        "apps/services/littlefs",
+        "core/shared"
+    },
+    output = "lfs.bin",
+    stack_size = "0x1000"
+})
 
 target("firmware")
     set_kind("phony")
     set_toolchains("arm-none-eabi")
     set_arch("cortex-m4")
     set_plat("cross")
-    add_deps("puppy", "hello", "shell", "test", "mpu_test", "driver")
+    add_deps("puppy", "hello", "shell", "test", "mpu_test", "driver", "lfs")
     
     after_build(function (target)
         local mode = is_mode("debug") and "debug" or "release"

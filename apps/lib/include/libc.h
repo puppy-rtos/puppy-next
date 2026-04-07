@@ -5,6 +5,31 @@
 #include <stddef.h>
 #include <stdarg.h>
 
+#define O_RDONLY                0000000
+#define O_WRONLY                0000001
+#define O_RDWR                  0000002
+#define O_CREAT                 0000100
+#define O_EXCL                  0000200
+#define O_TRUNC                 0001000
+#define O_APPEND                0002000
+#define O_NONBLOCK              0004000
+#define O_DIRECTORY             00200000
+
+#define SEEK_SET                0
+#define SEEK_CUR                1
+#define SEEK_END                2
+
+#define DT_UNKNOWN              0
+#define DT_DIR                  4
+#define DT_CHR                  2
+
+struct dirent {
+    unsigned char d_type;
+    unsigned char d_namlen;
+    unsigned short d_reclen;
+    char d_name[256];
+};
+
 typedef void* pthread_t;
 typedef unsigned long pup_tick_t;
 typedef struct {

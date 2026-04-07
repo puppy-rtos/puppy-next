@@ -7,6 +7,8 @@
 #include "mpu.h"
 #include "pup_fs.h"
 #include "pup_devfs.h"
+#include "pup_userfs.h"
+#include "shared/pup_userfs_proto.h"
 #include "pup_console.h"
 #include "kheap.h"
 #include "pup_sem.h"
@@ -507,7 +509,19 @@ static int sys_user_range_valid(app_process_t* app, const void* ptr, unsigned in
         return 0;
     }
 
-    return (ptr_start >= app_start) && (ptr_end <= app_end);
+    if ((ptr_start >= app_start) && (ptr_end <= app_end)) {
+        return 1;
+    }
+
+    if (app->flash_addr && app->flash_size > 0) {
+        unsigned int flash_start = app->flash_addr;
+        unsigned int flash_end = app->flash_addr + app->flash_size;
+        if ((ptr_start >= flash_start) && (ptr_end <= flash_end)) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 static int sys_user_string_valid(app_process_t* app, const char* str, unsigned int max_len) {
@@ -750,6 +764,156 @@ static long sys_channel_reply(long arg1, long arg2, long arg3, long arg4)
     return (long)pup_channel_reply(channel_id, cookie, result);
 }
 
+static long sys_userfs_register(long arg1, long arg2, long arg3, long arg4)
+{
+    const char *fs_type = (const char *)arg1;
+    int channel_id = (int)arg2;
+    app_process_t *app = app_get_current();
+
+    if (!app || !fs_type) {
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, fs_type, 32)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_register: invalid fs_type");
+        return -1;
+    }
+
+    return (long)pup_userfs_register_type(fs_type, app->pid, channel_id);
+}
+
+static long sys_userfs_unregister(long arg1, long arg2, long arg3, long arg4)
+{
+    const char *fs_type = (const char *)arg1;
+    app_process_t *app = app_get_current();
+
+    if (!app || !fs_type) {
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, fs_type, 32)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_unregister: invalid fs_type");
+        return -1;
+    }
+
+    return (long)pup_userfs_unregister_type(fs_type, app->pid);
+}
+
+static long sys_userfs_mount(long arg1, long arg2, long arg3, long arg4)
+{
+    const char *fs_type = (const char *)arg1;
+    const char *device = (const char *)arg2;
+    const char *mount_path = (const char *)arg3;
+    unsigned long flags = (unsigned long)arg4;
+    app_process_t *app = app_get_current();
+    int instance_id;
+    int ret;
+
+    if (!app || !fs_type || !mount_path) {
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, fs_type, 32)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mount: invalid fs_type");
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, mount_path, PUP_FS_PATH_MAX)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mount: invalid mount_path");
+        return -1;
+    }
+
+    if (device && !sys_user_string_valid(app, device, PUP_FS_PATH_MAX)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mount: invalid device");
+        return -1;
+    }
+
+    instance_id = pup_userfs_create_instance(fs_type, device, mount_path, flags, PUP_NULL, app->pid);
+    if (instance_id < 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mount: create instance failed");
+        return instance_id;
+    }
+    
+    ret = pup_fs_mount(device, mount_path, "userfs", flags, PUP_NULL);
+    if (ret < 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mount: pup_fs_mount failed: %d", ret);
+        pup_userfs_destroy_instance(instance_id, app->pid);
+        return ret;
+    }
+    
+    return instance_id;
+}
+
+static long sys_userfs_unmount(long arg1, long arg2, long arg3, long arg4)
+{
+    const char *mount_path = (const char *)arg1;
+    app_process_t *app = app_get_current();
+
+    if (!app || !mount_path) {
+        return -1;
+    }
+
+    if (!sys_user_string_valid(app, mount_path, PUP_FS_PATH_MAX)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_unmount: invalid mount_path");
+        return -1;
+    }
+
+    return (long)pup_fs_unmount(mount_path);
+}
+
+static long sys_userfs_mkfs(long arg1, long arg2, long arg3, long arg4)
+{
+    const char *fs_type = (const char *)arg1;
+    const char *device = (const char *)arg2;
+    app_process_t *app = app_get_current();
+    int channel_id;
+    pup_userfs_mkfs_req_t *req;
+    long result;
+    
+    (void)arg3;
+    (void)arg4;
+    
+    if (!app || !fs_type) {
+        return -1;
+    }
+    
+    if (!sys_user_string_valid(app, fs_type, 32)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mkfs: invalid fs_type");
+        return -1;
+    }
+    
+    if (device && !sys_user_string_valid(app, device, PUP_FS_PATH_MAX)) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mkfs: invalid device");
+        return -1;
+    }
+    
+    channel_id = pup_userfs_find_channel_by_type(fs_type);
+    if (channel_id < 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL, "sys_userfs_mkfs: fs_type '%s' not found", fs_type);
+        return -1;
+    }
+    
+    req = (pup_userfs_mkfs_req_t *)kheap_shared_malloc(sizeof(pup_userfs_mkfs_req_t));
+    if (!req) {
+        return -1;
+    }
+    
+    libcm_memset(req, 0, sizeof(pup_userfs_mkfs_req_t));
+    req->header.op = PUP_USERFS_OP_MKFS;
+    req->header.instance_id = -1;
+    req->header.fd = -1;
+    if (device) {
+        libcm_strncpy(req->device, device, PUP_USERFS_PATH_MAX - 1);
+    }
+    req->block_size = 0;
+    req->block_count = 0;
+    
+    result = pup_channel_send(channel_id, req, sizeof(pup_userfs_mkfs_req_t));
+    kheap_shared_free(req);
+    
+    return result;
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -788,6 +952,11 @@ static const syscall_func_t syscall_table[] = {
     [SYS_CHANNEL_CALL]    = sys_channel_call,
     [SYS_CHANNEL_RECEIVE] = sys_channel_receive,
     [SYS_CHANNEL_REPLY]   = sys_channel_reply,
+    [SYS_USERFS_REGISTER]   = sys_userfs_register,
+    [SYS_USERFS_UNREGISTER] = sys_userfs_unregister,
+    [SYS_USERFS_MOUNT]      = sys_userfs_mount,
+    [SYS_USERFS_UNMOUNT]    = sys_userfs_unmount,
+    [SYS_USERFS_MKFS]       = sys_userfs_mkfs,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

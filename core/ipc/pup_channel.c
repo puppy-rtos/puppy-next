@@ -192,7 +192,14 @@ long pup_channel_send(int channel_id, void *buf, int buf_sz)
     sem_post(&ch->recv_sem);
 
     /* Block until the server calls pup_channel_reply() */
-    sem_wait(&ch->slots[slot].sem);
+    result = sem_wait(&ch->slots[slot].sem);
+    if (result != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_IPC, "channel_send: sem_wait failed");
+        key = arch_irq_lock();
+        ch->slots[slot].used = 0;
+        arch_irq_unlock(key);
+        return -1;
+    }
 
     result = ch->slots[slot].result;
 

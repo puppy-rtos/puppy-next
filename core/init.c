@@ -12,6 +12,7 @@
 #include "pup_fs.h"
 #include "pup_devfs.h"
 #include "pup_romfs.h"
+#include "pup_userfs.h"
 #include "dev_uart.h"
 #include "dev_irq.h"
 #include "dev_spi.h"
@@ -75,6 +76,10 @@ void *puppy_main_thread(void *arg) {
 
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Registering romfs");
     pup_romfs_init();
+    
+    PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Initializing userfs framework");
+    pup_userfs_init();
+    pup_userfs_register_to_vfs();
     
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Mounting pup_devfs at /dev");
     if (pup_fs_mount(PUP_NULL, "/dev", "pup_devfs", 0, PUP_NULL) == 0) {

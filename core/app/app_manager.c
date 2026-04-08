@@ -496,8 +496,8 @@ static int app_exec_internal(const char* name, const char* path, const char* arg
 
     PUP_LOG_DEBUG(PUP_LOG_MODULE_APP, "Running app '%s'", name);
 
-    if (app_run(&app->image, name, &app->thread) != 0) {
-        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start app thread: %s", name);
+    if (app_run(&app->image, app->name, &app->thread) != 0) {
+        PUP_LOG_ERROR(PUP_LOG_MODULE_APP, "Failed to start app thread: %s", app->name);
         app_free_memory(pid);
         return -1;
     }

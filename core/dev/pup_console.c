@@ -2,7 +2,7 @@
 #include <puppy_core.h>
 #include "dtm_uart.h"
 #include "dtm_bindings.h"
-#include "arch/arm/cortex-m4/dtm_irq.h"
+#include "dtm_irq.h"
 
 /* ---- RX ring buffer ----------------------------------------------------- */
 

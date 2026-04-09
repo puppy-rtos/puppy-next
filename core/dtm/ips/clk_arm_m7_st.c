@@ -385,13 +385,23 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
     },
     [CLK_PLL] = {
         .name = "pll",
-        .parent = CLK_HSE,    // 默认父节点为 HSE
+#ifdef DTM_PLL_SRC_HSI
+        .parent = CLK_HSI,
+#else
+        .parent = CLK_HSE,
+#endif
         .ops = &pll_clk_ops,
-        .plln = 32,          // 默认 PLL 倍频系数
-        .pllm = 2,            // 默认 PLL 预分频系数
-        .pllp = 2,            // 默认 PLL P分频系数
-        .pllq = 2,            // 默认 PLL Q分频系数
-        .pllr = 2,            // 默认 PLL R分频系数
+#ifdef DTM_PLL_SRC_HSI
+        .plln = DTM_PLLN,
+        .pllm = DTM_PLLM,
+        .pllp = DTM_PLLP,
+#else
+        .plln = 32,
+        .pllm = 2,
+        .pllp = 2,
+#endif
+        .pllq = 2,
+        .pllr = 2,
         .enabled = 0,
     },
     [CLK_PLL_VCO] = {
@@ -667,96 +677,96 @@ uint8_t sys_clock_set(void)
     uint32_t pllq = dtm_clks[CLK_PLL].pllq;
     uint32_t pllr = dtm_clks[CLK_PLL].pllr;
 
+    RCC->CR |= 1 << 0; /* HSION = 1, enable HSI */
+    while (((RCC->CR & (1 << 1)) == 0) && (retry < 0X7FFF))
+    {
+        retry++;
+    }
+
+#ifdef DTM_PLL_SRC_HSI
+    RCC->PLLCKSELR &= ~(0x3F << 4);
+    RCC->PLLCKSELR |= pllm << 4;
+    RCC->PLLCKSELR &= ~(0b11 << 0);
+    RCC->PLLCKSELR |= 0b00 << 0;
+#else
     RCC->CR |= 1 << 16; /* HSEON = 1, enable HSE */
 
+    retry = 0;
     while (((RCC->CR & (1 << 17)) == 0) && (retry < 0X7FFF))
     {
-        retry++;        /* Wait for HSE RDY */
+        retry++;
     }
 
     if (retry == 0X7FFF)
     {
-        retval = 1;     /* HSE not ready */
+        return 1;
     }
-    else
+
+    RCC->PLLCKSELR &= ~(0x3F << 4);
+    RCC->PLLCKSELR |= pllm << 4;
+    RCC->PLLCKSELR &= ~(0b11 << 0);
+    RCC->PLLCKSELR |= 0b10 << 0;
+#endif
+        
+    RCC->PLLCFGR &= ~(1 << 1);
+#ifdef DTM_PLL_SRC_HSI
+    RCC->PLLCFGR &= ~(0b11 << 2);
+    RCC->PLLCFGR |= 0b01 << 2;
+#else
+    RCC->PLLCFGR |= 0b11 << 2;
+#endif
+    RCC->PLLCFGR &= ~(1 << 4);
+    RCC->PLLCFGR |= (1 << 16) | (1 << 17) | (1 << 18);
+
+    RCC->PLL1DIVR &= ~(0x1FF << 0);
+    RCC->PLL1DIVR |= (plln - 1) << 0;
+    RCC->PLL1DIVR &= ~(0x7F << 9);
+    RCC->PLL1DIVR |= (pllp - 1) << 9;
+    RCC->PLL1DIVR &= ~(0x7F << 16);
+    RCC->PLL1DIVR |= (pllq - 1) << 16;
+    RCC->PLL1DIVR &= ~(0x7F << 24);
+    RCC->PLL1DIVR |= (pllr - 1) << 24;
+
+    RCC->D1CFGR &= ~(0xF << 8);
+    uint32_t hclk_div = dtm_clks[CLK_HCLK].div;
+    RCC->D1CFGR = (RCC->D1CFGR & ~(0xF << 0)) | (get_ahb_prescaler_bits(hclk_div) << 0);
+
+    uint32_t pclk1_div = dtm_clks[CLK_PCLK1].div;
+    uint32_t pclk2_div = dtm_clks[CLK_PCLK2].div;
+    uint32_t pclk3_div = dtm_clks[CLK_PCLK3].div;
+    uint32_t pclk4_div = dtm_clks[CLK_PCLK4].div;
+    
+    RCC->D2CFGR = (RCC->D2CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk1_div) << 4);
+    RCC->D2CFGR = (RCC->D2CFGR & ~(0x7 << 8)) | (get_apb_prescaler_bits(pclk2_div) << 8);
+    RCC->D1CFGR = (RCC->D1CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk3_div) << 4);
+    RCC->D3CFGR = (RCC->D3CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk4_div) << 4);
+
+    RCC->CR |= 1 << 24;
+
+    retry = 0;
+    while ((RCC->CR & (1 << 25)) == 0)
     {
-        // RCC->APB1ENR |= 1 << 28;                /* Enable power interface clock */
+        retry++;
 
-        /* Set main PLL predivision factor,   DIVM1 PLLCKSELR[9:4]: 1~63 */
-        RCC->PLLCKSELR &= ~(0x3F << 4);          /* Clear PLLM bits */
-        RCC->PLLCKSELR |= pllm << 4;
-        /* Set main PLL clock source,         PLLCKSELR[1:0]: 0b00: HSI, 0b01: CSI, 0b10: HSE, 0b11: reserved */
-        RCC->PLLCKSELR &= ~(0b11 << 0);          /* Clear PLL source bits */
-        RCC->PLLCKSELR |= 0b10 << 0;            /* Set main PLL clock source to HSE */
-        
-        /* Set main PLL VCO PLLCFGR[1] wide.  0: Wide VCO range: 192 to 836 MHz (default after reset) 1: Medium VCO range: 150 to 420 MHz */
-        RCC->PLLCFGR &= ~(1 << 1);          /* Clear PLL VCO range bit */
-        /* Set main PLL input ref range PLLCFGR[3:2] 11: The PLL1 input (ref1_ck) clock range frequency is between 8 and 16 MHz */
-        RCC->PLLCFGR |= 0b11 << 2;          /* Set PLL input ref range to 8~16MHz */
-        /* Clear PLL1FRACEN PLLCFGR[4] */
-        RCC->PLLCFGR &= ~(1 << 4);          /* Clear PLL1 fractional enable bit */
-        /* Enable main PLL P Q R PLLCFGR[18：16] */
-        RCC->PLLCFGR |= (1 << 16) | (1 << 17) | (1 << 18); /* Enable main PLL P Q R division */
-
-        /* Set main PLL multiplication factor, PLL1DIVR[8:0] 0x003: DIVN1 = 4 0x004: DIVN1 = 5 */
-        RCC->PLL1DIVR &= ~(0x1FF << 0);         /* Clear PLLN bits */
-        RCC->PLL1DIVR |= (plln - 1) << 0;            /* Set main PLL multiplication factor, PLLN[8:0]: 4~512 */
-        /* Set main PLL p division factor, PLL1DIVR[15:9] 0000001: pll1_p_ck = vco1_ck / 2 0000011: pll1_p_ck = vco1_ck / 4 */
-        RCC->PLL1DIVR &= ~(0x7F << 9);         /* Clear PLLP bits */
-        RCC->PLL1DIVR |= (pllp - 1) << 9; /* Set main PLL p division factor, PLLP[6:0]: 2~128, must be a multiple of 2 */
-        /* Set main PLL q division factor, PLL1DIVR[22:16] 0000001: pll1_q_ck = vco1_ck / 2 */
-        RCC->PLL1DIVR &= ~(0x7F << 16);        /* Clear PLLQ bits */
-        RCC->PLL1DIVR |= (pllq - 1) << 16; /* Set main PLL q division factor, PLLQ[6:0]: 2~128 */
-        /* Set main PLL r division factor, PLL1DIVR[30:24] 0000001: pll1_r_ck = vco1_ck / 2 */
-        RCC->PLL1DIVR &= ~(0x7F << 24);        /* Clear PLLR bits */
-        RCC->PLL1DIVR |= (pllr - 1) << 24; /* Set main PLL r division factor, PLLR[6:0]: 2~128 */
-
-        /* RCC Domain 1 Clock Configuration Register */
-        /* Core prescaler not divided D1CFGR[11:8] 0xxx: sys_ck not divided (default after reset) 1000: sys_ck divided by 2 */
-        RCC->D1CFGR &= ~(0xF << 8);            /* Clear D1CPRE bits */
-        /* 配置AHB分频 */
-        uint32_t hclk_div = dtm_clks[CLK_HCLK].div;
-        RCC->D1CFGR = (RCC->D1CFGR & ~(0xF << 0)) | (get_ahb_prescaler_bits(hclk_div) << 0);  /* HPRE[3:0] */
-
-        /* 配置APB1/2/3/4分频 */
-        uint32_t pclk1_div = dtm_clks[CLK_PCLK1].div;
-        uint32_t pclk2_div = dtm_clks[CLK_PCLK2].div;
-        uint32_t pclk3_div = dtm_clks[CLK_PCLK3].div;
-        uint32_t pclk4_div = dtm_clks[CLK_PCLK4].div;
-        
-        RCC->D2CFGR = (RCC->D2CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk1_div) << 4);  /* PPRE1[2:0] */
-        RCC->D2CFGR = (RCC->D2CFGR & ~(0x7 << 8)) | (get_apb_prescaler_bits(pclk2_div) << 8);  /* PPRE2[2:0] */
-        RCC->D1CFGR = (RCC->D1CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk3_div) << 4);  /* PPRE3[2:0] */
-        RCC->D3CFGR = (RCC->D3CFGR & ~(0x7 << 4)) | (get_apb_prescaler_bits(pclk4_div) << 4);  /* PPRE4[2:0] */
-
-        RCC->CR |= 1 << 24;                     /* Enable main PLL */
-
-        retry = 0;
-        while ((RCC->CR & (1 << 25)) == 0)      /* Wait for PLL ready */
+        if (retry > 0X1FFFFF)
         {
-            retry++;
-
-            if (retry > 0X1FFFFF)
-            {
-                retval = 2;                     /* Main PLL not ready */
-                break;
-            }
+            retval = 2;
+            break;
         }
+    }
 
-        
-        RCC->CFGR |= 3 << 0;                    /* Select main PLL as system clock */
-        
-        retry = 0;
-        while (swsval != 3)                     /* Wait for successful switch of system clock source to pll_p_ck */
+    RCC->CFGR |= 3 << 0;
+    
+    retry = 0;
+    while (swsval != 3)
+    {
+        swsval = (RCC->CFGR & 0X38) >> 3;
+        retry++;
+
+        if (retry > 0X1FFFFF)
         {
-            swsval = (RCC->CFGR & 0X38) >> 3;   /* Get SWS[2:0] status to check if switch is successful */
-            retry++;
-
-            if (retry > 0X1FFFFF)
-            {
-                retval = 4; /* Unable to switch clock */
-                break;
-            }
+            retval = 4;
+            break;
         }
     }
 
@@ -785,21 +795,22 @@ void sys_stm32_clock_init(void)
 void dtm_clk_dumptree(void)
 {
     uint32_t hse = DTM_HSE_FREQ;
-    // M7使用不同的寄存器结构，从PLLCKSELR和PLL1DIVR读取PLL参数
-    uint32_t pllm = (RCC->PLLCKSELR >> 4) & 0x3F;         // DIVM1[5:0] in PLLCKSELR
-    uint32_t plln = ((RCC->PLL1DIVR >> 0) & 0x1FF) + 1;   // DIVN1[8:0] in PLL1DIVR, +1是因为寄存器值是实际值减1
-    uint32_t pllp = ((RCC->PLL1DIVR >> 9) & 0x7F) + 1;    // DIVP1[6:0] in PLL1DIVR, +1是因为寄存器值是实际值减1
-    uint32_t pllq = ((RCC->PLL1DIVR >> 16) & 0x7F) + 1;   // DIVQ1[6:0] in PLL1DIVR, +1是因为寄存器值是实际值减1
-    uint32_t sysclk_src = (RCC->CFGR >> 3) & 0x7;         // SWS[2:0] in CFGR, M7是3位
-    
-    // 从D1CFGR读取AHB预分频
-    uint32_t hpre = (RCC->D1CFGR >> 0) & 0xF;             // HPRE[3:0] in D1CFGR
-    // 从D2CFGR读取APB预分频
-    uint32_t ppre1 = (RCC->D2CFGR >> 4) & 0x7;            // PPRE1[2:0] in D2CFGR
-    uint32_t ppre2 = (RCC->D2CFGR >> 8) & 0x7;            // PPRE2[2:0] in D2CFGR
-    
-    // Calculate PLL VCO frequency
-    pll_vco = (uint64_t)hse * plln / pllm;
+    uint32_t pllm = (RCC->PLLCKSELR >> 4) & 0x3F;
+    uint32_t plln = ((RCC->PLL1DIVR >> 0) & 0x1FF) + 1;
+    uint32_t pllp = ((RCC->PLL1DIVR >> 9) & 0x7F) + 1;
+    uint32_t pllq = ((RCC->PLL1DIVR >> 16) & 0x7F) + 1;
+    uint32_t sysclk_src = (RCC->CFGR >> 3) & 0x7;
+
+    uint32_t hpre = (RCC->D1CFGR >> 0) & 0xF;
+    uint32_t ppre1 = (RCC->D2CFGR >> 4) & 0x7;
+    uint32_t ppre2 = (RCC->D2CFGR >> 8) & 0x7;
+
+#ifdef DTM_PLL_SRC_HSI
+    uint32_t pll_input = dtm_clks[CLK_HSI].freq;
+#else
+    uint32_t pll_input = hse;
+#endif
+    pll_vco = (uint64_t)pll_input * plln / pllm;
     pll_p_ck = pll_vco / pllp;
     pll_q_ck = pll_vco / pllq;
 
@@ -825,8 +836,13 @@ void dtm_clk_dumptree(void)
     pclk2 = hclk / apb_presc_tbl[ppre2];
 
     dtm_printf("clock-tree\n");
+#ifdef DTM_PLL_SRC_HSI
+    dtm_printf("├── HSI (%lu Hz)\n", dtm_clks[CLK_HSI].freq);
+    dtm_printf("│   └── PLL\n");
+#else
     dtm_printf("├── HSE (%lu Hz)\n", hse);
     dtm_printf("│   └── PLL\n");
+#endif
     dtm_printf("│       ├── VCO (%lu Hz)\n", pll_vco);
     dtm_printf("│       ├── PLL_P (SYSCLK, %lu Hz)\n", pll_p_ck);
     dtm_printf("│       │   └── AHB (HCLK, %lu Hz)\n", hclk);

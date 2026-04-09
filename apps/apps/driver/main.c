@@ -1,14 +1,16 @@
 #include "libc.h"
 #include "syscall.h"
-#include "dtm_spi.h"
 #include "dtm_gpio.h"
 #include "dtm_bindings.h"
 #include "shared/pup_devfs_proto.h"
 #include "shared/pup_driver_abi.h"
-#include "shared/pup_spi.h"
 #include "driver_gpio.h"
+#ifndef DTM_NO_SPI_FLASH
+#include "dtm_spi.h"
+#include "shared/pup_spi.h"
 #include "driver_spi.h"
 #include "driver_flash.h"
+#endif
 
 int g_server_channel = -1;
 int g_key_irq_handle = -1;
@@ -44,11 +46,14 @@ static void gpio_service_loop(void)
             pup_devfs_proxy_payload_t* req = (pup_devfs_proxy_payload_t*)msg.buf;
             int ret;
 
+#ifndef DTM_NO_SPI_FLASH
             if (req->device_id == SPI_DEVICE_ID) {
                 ret = spi_handle_request(req);
             } else if (req->device_id == FLASH_DEVICE_ID) {
                 ret = flash_handle_request(req);
-            } else {
+            } else
+#endif
+            {
                 gpio_user_dev_t* dev = gpio_find_by_id(req->device_id);
                 ret = gpio_handle_request(dev, req);
             }
@@ -95,6 +100,7 @@ void app_main(const char* arg)
         }
     }
 
+#ifndef DTM_NO_SPI_FLASH
     /* Initialize SPI2 and register /dev/spi2 */
     {
         dtm_spi_config_t spi_cfg;
@@ -134,6 +140,7 @@ void app_main(const char* arg)
             printf("[driver] flash0 initialized\n");
         }
     }
+#endif
 
     printf("[driver] ready\n");
     gpio_service_loop();

@@ -1,0 +1,6 @@
+- [ ] driver 目标构建成功，使用 core/dtm 代码
+- [ ] driver-m7 目标构建成功，使用 core/dtm 代码
+- [ ] DTM_NO_SPI_FLASH 宏正确生效，driver-m7 不包含 SPI/Flash 代码
+- [ ] apps/apps/driver/dtm 目录已删除
+- [ ] 所有 M4 目标构建不受影响
+- [ ] 所有 M7 目标构建不受影响

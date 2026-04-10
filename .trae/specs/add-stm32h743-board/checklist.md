@@ -1,0 +1,18 @@
+- [x] `core/dtm/chips/stm32h743/dtm_bindings.h` 存在，包含正确的 IP 描述宏（DTM_BINFDING_CLK_ARM_M7_ST, DTM_BINFDING_UART_ARM_M7_ST, DTM_BINFDING_PMCTRL_ARM_M7_ST_GD 等）
+- [x] `core/dtm/chips/stm32h743/dtm_bindings.h` 中 HSE 频率、SYSCLK 目标、Debug UART 引脚配置正确（与 H743 数据手册一致）
+- [x] `core/dtm/chips/stm32h743/start.s` 存在，`.cpu` 指令为 `cortex-m7`，向量表包含 STM32H743 的中断向量
+- [x] `core/dtm/arch/arm/cortex-m7/dtm_irq.h` 存在，NVIC 结构定义正确
+- [x] xmake.lua 中 `puppy-m7` target 存在，使用 `-mcpu=cortex-m7` 编译标志
+- [x] `puppy-m7` target 的 include dirs 包含 `core/dtm/chips/stm32h743` 和 `core/dtm/arch/arm/cortex-m7`
+- [x] `puppy-m7` target 的 source files 包含 `core/dtm/chips/stm32h743/start.s`
+- [x] `puppy-m7` target 通过 add_defines 传入 H743 内存布局（PUP_KERNEL_RAM_BASE=0x24000000 等）
+- [x] xmake.lua 中 `define_user_app_target_m7` 函数存在，使用 cortex-m7 标志
+- [x] M7 版 app targets 存在（hello-m7, shell-m7, test-m7, mpu_test-m7, lfs-m7）
+- [x] M7 版 app 产物输出到 `output/apps-m7/<name>.bin`
+- [x] `driver-m7` target 存在
+- [x] `firmware-m7` target 存在，依赖所有 M7 目标
+- [x] `firmware-m7` 产物输出到 `output/firmware/firmware-m7.bin`
+- [x] 现有 M4 目标（puppy, firmware）构建不受影响
+- [x] `xmake -r` M4 目标构建成功
+- [x] `xmake build puppy-m7` 构建成功
+- [x] `xmake build firmware-m7` 构建成功

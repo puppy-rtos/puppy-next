@@ -156,18 +156,18 @@ define_user_app_target("driver", {
         "apps/apps/driver/driver_gpio.c",
         "apps/apps/driver/driver_spi.c",
         "apps/apps/driver/driver_flash.c",
-        "apps/apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
-        "apps/apps/driver/dtm/ips/clk_arm_m4_st_gd.c",
-        "apps/apps/driver/dtm/ips/spi_arm_m4_st_gd.c",
+        "core/dtm/ips/gpio_arm_m4_st_gd.c",
+        "core/dtm/ips/clk_arm_m4_st_gd.c",
+        "core/dtm/ips/spi_arm_m4_st_gd.c",
         "apps/apps/driver/sfud/src/*.c"
     },
     includes = {
         "apps/apps/driver",
-        "apps/apps/driver/dtm",
-        "apps/apps/driver/dtm/common",
-        "apps/apps/driver/dtm/ips",
-        "apps/apps/driver/dtm/arch/arm/cortex-m4",
-        "apps/apps/driver/dtm/chips/stm32f407",
+        "core/dtm",
+        "core/dtm/common",
+        "core/dtm/ips",
+        "core/dtm/arch/arm/cortex-m4",
+        "core/dtm/chips/stm32f407",
         "apps/apps/driver/sfud/inc",
         "core/shared"
     },
@@ -346,17 +346,20 @@ define_user_app_target_m7("driver-m7", {
     sources = {
         "apps/apps/driver/main.c",
         "apps/apps/driver/driver_gpio.c",
-        "apps/apps/driver/dtm/ips/gpio_arm_m4_st_gd.c",
-        "apps/apps/driver/dtm/ips/clk_arm_m7_st.c"
+        "core/dtm/ips/gpio_arm_m4_st_gd.c",
+        "core/dtm/ips/clk_arm_m7_st.c"
     },
     includes = {
         "apps/apps/driver",
-        "apps/apps/driver/dtm",
-        "apps/apps/driver/dtm/common",
-        "apps/apps/driver/dtm/ips",
-        "apps/apps/driver/dtm/arch/arm/cortex-m7",
-        "apps/apps/driver/dtm/chips/stm32h743",
+        "core/dtm",
+        "core/dtm/common",
+        "core/dtm/ips",
+        "core/dtm/arch/arm/cortex-m7",
+        "core/dtm/chips/stm32h743",
         "core/shared"
+    },
+    defines = {
+        "DTM_NO_SPI_FLASH=1"
     },
     output = "driver.bin",
     stack_size = "0x800"

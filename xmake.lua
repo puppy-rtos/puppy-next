@@ -1,6 +1,6 @@
 toolchain("arm-none-eabi")
     set_kind("standalone")
-    set_sdkdir("D:/Progrem/arm-gnu-toolchain-12.2.rel1")
+    set_sdkdir("C:/RuiChingStudio/repo/Extract/ToolChain_Support_Packages/ARM/gcc-arm-10.3.1-2021.10")
     set_bindir("bin")
 target_end()
 
@@ -68,8 +68,8 @@ target("puppy")
         "core/libcm/libcm.c",
         "core/dtm/chips/stm32f407/start.s"
     )
-    
-    add_defines("PUP_MPU_ENABLED")
+
+    add_defines("PUP_MPU_ENABLED", "_POSIX_C_SOURCE=199309L")
 
     add_includedirs(
         "core/dtm/chips/stm32f407",
@@ -79,7 +79,8 @@ target("puppy")
 
     after_build(function (target)
         os.mkdir("output/kernel")
-        os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/kernel/puppy.bin", target:targetfile())
+        local objcopy = target:tool("objcopy")
+        os.run("%s -O binary %s output/kernel/puppy.bin", objcopy, target:targetfile())
     end)
 
 function define_user_app_target(target_name, config)
@@ -88,7 +89,7 @@ function define_user_app_target(target_name, config)
     local output_bin_name = config.output
     local stack_size = config.stack_size
     local defines = config.defines or {}
-    
+
     target(target_name)
         set_kind("binary")
         set_extension(".elf")
@@ -100,6 +101,7 @@ function define_user_app_target(target_name, config)
         add_cxflags('-fpie -fPIC -msingle-pic-base -mno-pic-data-is-text-relative')
         add_asflags('-c -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -x assembler-with-cpp -ffunction-sections -fdata-sections')
         add_mode_compile_flags()
+        add_defines("_POSIX_C_SOURCE=199309L")
         add_ldflags('-mcpu=cortex-m4 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
         add_ldflags(' -T ' .. os.scriptdir() .. '/apps/lib/linker/app.lds')
         if stack_size ~= nil then
@@ -110,7 +112,7 @@ function define_user_app_target(target_name, config)
         if #includes > 0 then
             add_includedirs(includes)
         end
-        
+
         if #defines > 0 then
             add_defines(defines)
         end
@@ -126,7 +128,8 @@ function define_user_app_target(target_name, config)
 
         after_build(function (target)
             os.mkdir("output/apps")
-            os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/apps/" .. output_bin_name, target:targetfile())
+            local objcopy = target:tool("objcopy")
+            os.run("%s -O binary %s output/apps/%s", objcopy, target:targetfile(), output_bin_name)
         end)
 end
 
@@ -197,7 +200,7 @@ target("firmware")
     set_arch("cortex-m4")
     set_plat("cross")
     add_deps("puppy", "hello", "shell", "test", "mpu_test", "driver", "lfs")
-    
+
     after_build(function (target)
         local mode = is_mode("debug") and "debug" or "release"
         print("Packing ROMFS and creating unified firmware...")
@@ -248,8 +251,8 @@ target("puppy-m7")
         "core/libcm/libcm.c",
         "core/dtm/chips/stm32h743/start.s"
     )
-    
-    add_defines("PUP_MPU_ENABLED")
+
+    add_defines("PUP_MPU_ENABLED", "_POSIX_C_SOURCE=199309L")
 
     add_defines(
         "PUP_KERNEL_RAM_BASE=0x24000000",
@@ -271,7 +274,8 @@ target("puppy-m7")
 
     after_build(function (target)
         os.mkdir("output/kernel")
-        os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/kernel/puppy-m7.bin", target:targetfile())
+        local objcopy = target:tool("objcopy")
+        os.run("%s -O binary %s output/kernel/puppy-m7.bin", objcopy, target:targetfile())
     end)
 
 function define_user_app_target_m7(target_name, config)
@@ -280,7 +284,7 @@ function define_user_app_target_m7(target_name, config)
     local output_bin_name = config.output
     local stack_size = config.stack_size
     local defines = config.defines or {}
-    
+
     target(target_name)
         set_kind("binary")
         set_extension(".elf")
@@ -292,6 +296,7 @@ function define_user_app_target_m7(target_name, config)
         add_cxflags('-fpie -fPIC -msingle-pic-base -mno-pic-data-is-text-relative')
         add_asflags('-c -mcpu=cortex-m7 -mthumb -mfloat-abi=soft -x assembler-with-cpp -ffunction-sections -fdata-sections')
         add_mode_compile_flags()
+        add_defines("_POSIX_C_SOURCE=199309L")
         add_ldflags('-mcpu=cortex-m7 -mthumb -mfloat-abi=soft -nostartfiles -Wl,--gc-sections -n -pie -Wl,--no-dynamic-linker',{force = true})
         add_ldflags(' -T ' .. os.scriptdir() .. '/apps/lib/linker/app.lds')
         if stack_size ~= nil then
@@ -302,7 +307,7 @@ function define_user_app_target_m7(target_name, config)
         if #includes > 0 then
             add_includedirs(includes)
         end
-        
+
         if #defines > 0 then
             add_defines(defines)
         end
@@ -318,7 +323,8 @@ function define_user_app_target_m7(target_name, config)
 
         after_build(function (target)
             os.mkdir("output/apps-m7")
-            os.run("D:/Progrem/arm-gnu-toolchain-12.2.rel1/bin/arm-none-eabi-objcopy -O binary %s output/apps-m7/" .. output_bin_name, target:targetfile())
+            local objcopy = target:tool("objcopy")
+            os.run("%s -O binary %s output/apps-m7/%s", objcopy, target:targetfile(), output_bin_name)
         end)
 end
 
@@ -387,7 +393,7 @@ target("firmware-m7")
     set_arch("cortex-m7")
     set_plat("cross")
     add_deps("puppy-m7", "hello-m7", "shell-m7", "test-m7", "mpu_test-m7", "driver-m7", "lfs-m7")
-    
+
     after_build(function (target)
         local mode = is_mode("debug") and "debug" or "release"
         print("Packing ROMFS and creating unified M7 firmware...")

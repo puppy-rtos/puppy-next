@@ -281,7 +281,7 @@ static uint32_t dtm_mpu_choose_region_size(uint32_t app_base, uint32_t app_size)
 
 /* Configure MPU region with sub-region masking
  * Uses two regions (front and back) to precisely match app RAM range
- * 
+ *
  * Strategy:
  * - Only align app_base to subregion boundary (4KB for 32KB region)
  * - app_end keeps actual value (not aligned) - this is the ACTUAL needed end

@@ -4,7 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-DEFAULT_QEMU = r"D:\RT-ThreadStudio\repo\Extract\Debugger_Support_Packages\RealThread\QEMU\4.2.0.4\qemu-system-arm.exe"
+DEFAULT_QEMU = r"C:\RT-ThreadStudio\repo\Extract\Debugger_Support_Packages\RealThread\QEMU\4.2.0.2\qemu-system-arm.exe"
 DEFAULT_MACHINE = "stm32f407-atk-explorer"
 DEFAULT_FIRMWARE = "output/firmware/firmware.bin"
 PROMPT = "puppy>"

@@ -38,6 +38,8 @@ Excluded from this phase:
 - Device-specific open, read, write, and ioctl semantics.
 - Device private state machine.
 - Request handling loops and buffering policy.
+- Driver-specific device-tree binding parsing.
+- Driver-owned resource indexes derived from DTB data.
 - Future IRQ consumption logic via event-based wait APIs.
 
 ## 4. Architecture Overview
@@ -46,11 +48,17 @@ Today, device nodes are backed by kernel driver file operations registered direc
 
 Target runtime flow:
 1. A user-mode driver app starts.
-2. The driver calls a syscall to register one or more devices in DevFS.
-3. DevFS stores the device entry with owner pid and source type `user`.
-4. Client apps open `/dev/<name>` through the normal VFS path.
-5. DevFS dispatches operations to a driver-facing proxy path owned by that user driver.
-6. If the driver exits, the kernel marks the device offline and reclaims the node.
+2. The driver obtains the read-only DTB flash address through the generic DTM
+   syscall.
+3. The shared DTM OF match/probe walker dispatches compatible matches to each
+   registered driver module.
+4. Each driver module parses the bindings it owns in `probe(node)` and derives
+   device names/resources.
+5. The driver calls a syscall to register one or more devices in DevFS.
+6. DevFS stores the device entry with owner pid and source type `user`.
+7. Client apps open `/dev/<name>` through the normal VFS path.
+8. DevFS dispatches operations to a driver-facing proxy path owned by that user driver.
+9. If the driver exits, the kernel marks the device offline and reclaims the node.
 
 ## 5. ABI v1 (Channel + Pulse)
 

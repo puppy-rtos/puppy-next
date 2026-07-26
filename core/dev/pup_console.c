@@ -3,6 +3,7 @@
 #include "dtm_uart.h"
 #include "dtm_bindings.h"
 #include "dtm_irq.h"
+#include "dtm_board.h"
 
 /* ---- RX ring buffer ----------------------------------------------------- */
 
@@ -67,6 +68,17 @@ static void uart_rx_irq_cb(uint8_t data)
     }
 }
 
+static unsigned int console_irq_num(void)
+{
+    pup_dtm_uart_config_t config;
+
+    if (dtm_board_get_console(&config) == 0 && config.valid && config.irq_num != 0U) {
+        return config.irq_num;
+    }
+
+    return DTM_DEBUG_UART_IRQn;
+}
+
 /* ---- public API ---------------------------------------------------------- */
 
 void pup_console_init(void)
@@ -85,8 +97,8 @@ void pup_console_init(void)
 
     dtm_uart_set_rx_callback(uart_rx_irq_cb);
     dtm_uart_enable_rx_it();
-    dtm_nvic_enable_irq(DTM_ChipSpecific_IRQn + DTM_DEBUG_UART_IRQn);
-    dtm_nvic_set_priority(DTM_ChipSpecific_IRQn + DTM_DEBUG_UART_IRQn, 1);
+    dtm_nvic_enable_irq(DTM_ChipSpecific_IRQn + console_irq_num());
+    dtm_nvic_set_priority(DTM_ChipSpecific_IRQn + console_irq_num(), 1);
 
     g_inited = 1;
     arch_irq_unlock(key);

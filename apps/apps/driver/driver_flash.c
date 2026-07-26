@@ -1,6 +1,5 @@
 #include "libc.h"
 #include "syscall.h"
-#include "dtm_bindings.h"
 #include "dtm_spi.h"
 #include "dtm_gpio.h"
 #include "shared/pup_devfs_proto.h"
@@ -8,14 +7,10 @@
 #include "shared/pup_flash.h"
 #include "shared/pup_spi.h"
 #include "driver_flash.h"
+#include "driver_spi.h"
+#include "driver_of.h"
 #include <sfud.h>
 #include <stdarg.h>
-
-#define DEV_FLASH_DEV_PATH           "/dev/flash0"
-#define DEV_FLASH_TEST_READ_SIZE     16
-
-#define FLASH_CS_GPIOX    GPIOB
-#define FLASH_CS_PIN      DTM_GPIO_PIN12
 
 #ifndef NULL
 #define NULL ((void*)0)
@@ -27,6 +22,128 @@ typedef struct {
 } dev_flash_ctx_t;
 
 static dev_flash_ctx_t g_dev_flash_ctx;
+
+static pup_dtm_flash_device_t g_flash_devices[PUP_DTM_MAX_FLASH_DEVICES];
+static unsigned int g_flash_count;
+static int g_flash_using_dtb;
+
+static int flash_of_probe(dtm_ofw_node_t node);
+
+static const char *const g_flash_compatibles[] = {
+    "jedec,spi-nor",
+};
+
+const dtm_of_driver_t g_flash_of_driver = {
+    "flash",
+    g_flash_compatibles,
+    DTM_ARRAY_SIZE(g_flash_compatibles),
+    flash_of_probe,
+};
+
+static void flash_clear_devices(void)
+{
+    libcm_memset(g_flash_devices, 0, sizeof(g_flash_devices));
+    g_flash_count = 0U;
+}
+
+static void flash_begin_dtb_probe(void)
+{
+    if (g_flash_using_dtb) {
+        return;
+    }
+
+    flash_clear_devices();
+    g_flash_using_dtb = 1;
+}
+
+void flash_resources_init(void)
+{
+    flash_clear_devices();
+    g_flash_using_dtb = 0;
+}
+
+static int flash_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_flash_device_t *flash;
+    const char *name = 0;
+    dtm_ofw_node_t parent;
+    int bus_index;
+    uint32_t value;
+
+    flash_begin_dtb_probe();
+    if (g_flash_count >= PUP_DTM_MAX_FLASH_DEVICES) {
+        return -1;
+    }
+
+    flash = &g_flash_devices[g_flash_count];
+    libcm_memset(flash, 0, sizeof(*flash));
+    flash->valid = 1U;
+
+    if (driver_of_prop_read_string(node, "puppy,dev-name", &name) < 0) {
+        name = driver_of_node_base_name(dtm_ofw_node_name(node));
+    }
+    driver_of_copy_name(flash->name, name);
+
+    if (dtm_ofw_prop_read_u32(node, "puppy,device-id", &value) == 0) {
+        flash->device_id = (uint8_t)value;
+    } else {
+        flash->device_id = (uint8_t)(4U + g_flash_count);
+    }
+
+    parent = dtm_ofw_get_parent(node);
+    bus_index = spi_bus_index_by_node(parent);
+    flash->spi_bus_index = (uint8_t)(bus_index >= 0 ? bus_index : 0);
+
+    if (dtm_ofw_prop_read_u32(node, "reg", &value) == 0) {
+        flash->cs_id = (uint8_t)value;
+    }
+
+    flash->mode = 0U;
+    flash->datasize = 0U;
+    flash->prescaler = 2U;
+    flash->firstbit = 0U;
+    if (dtm_ofw_prop_read_u32(node, "puppy,baudrate-prescaler", &value) == 0) {
+        flash->prescaler = (uint8_t)value;
+    }
+
+    g_flash_count++;
+    return 0;
+}
+
+const pup_dtm_flash_device_t *flash_device(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < g_flash_count && i < PUP_DTM_MAX_FLASH_DEVICES; i++) {
+        if (g_flash_devices[i].valid) {
+            return &g_flash_devices[i];
+        }
+    }
+
+    return (const pup_dtm_flash_device_t *)0;
+}
+
+static const pup_dtm_spi_bus_t *flash_spi_bus(void)
+{
+    const pup_dtm_flash_device_t *flash = flash_device();
+
+    if (!flash) {
+        return (const pup_dtm_spi_bus_t *)0;
+    }
+
+    return spi_bus_by_index(flash->spi_bus_index);
+}
+
+static const pup_dtm_spi_cs_t *flash_spi_cs(void)
+{
+    const pup_dtm_flash_device_t *flash = flash_device();
+
+    if (!flash) {
+        return (const pup_dtm_spi_cs_t *)0;
+    }
+
+    return spi_cs(flash->cs_id);
+}
 
 static void sfud_spi_lock(const sfud_spi *spi)
 {
@@ -40,12 +157,18 @@ static void sfud_spi_unlock(const sfud_spi *spi)
 
 static void flash_cs_select(void)
 {
-    dtm_gpio_pin_set(FLASH_CS_GPIOX, FLASH_CS_PIN, 0);
+    const pup_dtm_spi_cs_t *cs = flash_spi_cs();
+    if (cs) {
+        dtm_gpio_pin_set(cs->gpio_base, cs->pin_mask, 0);
+    }
 }
 
 static void flash_cs_deselect(void)
 {
-    dtm_gpio_pin_set(FLASH_CS_GPIOX, FLASH_CS_PIN, 1);
+    const pup_dtm_spi_cs_t *cs = flash_spi_cs();
+    if (cs) {
+        dtm_gpio_pin_set(cs->gpio_base, cs->pin_mask, 1);
+    }
 }
 
 static sfud_err dev_flash_do_transfer(const uint8_t *write_buf,
@@ -53,20 +176,26 @@ static sfud_err dev_flash_do_transfer(const uint8_t *write_buf,
                                       uint8_t *read_buf,
                                       size_t read_size)
 {
+    const pup_dtm_spi_bus_t *bus = flash_spi_bus();
+
     if ((write_size == 0 && read_size == 0) || (write_buf == NULL && write_size != 0)) {
         printf("[driver] dev_flash_do_transfer: invalid params write_size=%u read_size=%u\n",
                (unsigned)write_size, (unsigned)read_size);
         return SFUD_ERR_WRITE;
     }
 
+    if (!bus || bus->base == 0U) {
+        return SFUD_ERR_NOT_FOUND;
+    }
+
     flash_cs_select();
 
     for (size_t i = 0; i < write_size; i++) {
-        dtm_spi_transmit_byte(DTM_SPI2_BASE, write_buf[i]);
+        dtm_spi_transmit_byte(bus->base, write_buf[i]);
     }
 
     for (size_t i = 0; i < read_size; i++) {
-        read_buf[i] = dtm_spi_transmit_byte(DTM_SPI2_BASE, 0xFF);
+        read_buf[i] = dtm_spi_transmit_byte(bus->base, 0xFF);
     }
 
     flash_cs_deselect();
@@ -86,24 +215,27 @@ static sfud_err spi_write_read(const sfud_spi *spi,
 
 sfud_err sfud_spi_port_init(sfud_flash *flash)
 {
+    const pup_dtm_flash_device_t *flash_cfg = flash_device();
+    const pup_dtm_spi_bus_t *bus = flash_spi_bus();
+    const pup_dtm_spi_cs_t *cs = flash_spi_cs();
 
-    if (flash == NULL) {
+    if (flash == NULL || !flash_cfg || !bus || !cs) {
         return SFUD_ERR_NOT_FOUND;
     }
 
-    dtm_gpio_set(FLASH_CS_GPIOX, FLASH_CS_PIN, DTM_GPIO_MODE_OUT, DTM_GPIO_OTYPE_PP,
+    dtm_gpio_set(cs->gpio_base, cs->pin_mask, DTM_GPIO_MODE_OUT, DTM_GPIO_OTYPE_PP,
                  DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
     flash_cs_deselect();
 
     {
         dtm_spi_config_t spi_cfg;
-        spi_cfg.mode = DTM_SPI_MODE_0;
-        spi_cfg.datasize = DTM_SPI_DATASIZE_8BIT;
-        spi_cfg.baudrate_prescaler = DTM_SPI_BAUDRATE_PRESCALER_8;
-        spi_cfg.firstbit = 0;
+        spi_cfg.mode = flash_cfg->mode;
+        spi_cfg.datasize = flash_cfg->datasize;
+        spi_cfg.baudrate_prescaler = flash_cfg->prescaler;
+        spi_cfg.firstbit = flash_cfg->firstbit;
         spi_cfg.crc_polarity = 0;
-        dtm_spi_init(DTM_SPI2_BASE, &spi_cfg);
-        dtm_spi_enable(DTM_SPI2_BASE);
+        dtm_spi_init(bus->base, &spi_cfg);
+        dtm_spi_enable(bus->base);
     }
 
     flash->spi.wr = spi_write_read;
@@ -249,25 +381,33 @@ int flash_handle_request(pup_devfs_proxy_payload_t *req)
 int flash_register_one(void)
 {
     extern int g_server_channel;
+    const pup_dtm_flash_device_t *flash_cfg = flash_device();
     pup_user_devfs_registration_t reg;
     char name_buf[17];
+    int i;
 
-    name_buf[0] = 'f'; name_buf[1] = 'l'; name_buf[2] = 'a'; name_buf[3] = 's';
-    name_buf[4] = 'h'; name_buf[5] = '0'; name_buf[6] = '\0';
+    if (!flash_cfg || !flash_cfg->valid || flash_cfg->name[0] == '\0') {
+        return -1;
+    }
+
+    for (i = 0; i < 16 && flash_cfg->name[i] != '\0'; i++) {
+        name_buf[i] = flash_cfg->name[i];
+    }
+    name_buf[i] = '\0';
 
     reg.name = name_buf;
     reg.flags = PUP_DRIVER_DEVICE_FLAG_NONE;
     reg.capabilities = PUP_DRIVER_CAP_NONE;
     reg.channel_id = g_server_channel;
-    reg.device_id = FLASH_DEVICE_ID;
+    reg.device_id = flash_cfg->device_id;
 
     if (devfs_register(&reg) != 0) {
-        printf("[driver] devfs_register failed for flash0\n");
+        printf("[driver] devfs_register failed for %s\n", flash_cfg->name);
         return -1;
     }
 
-    printf("[driver] registered /dev/flash0 channel=%d devid=%d\n",
-           g_server_channel, FLASH_DEVICE_ID);
+    printf("[driver] registered /dev/%s channel=%d devid=%d\n",
+           flash_cfg->name, g_server_channel, flash_cfg->device_id);
     return 0;
 }
 
@@ -292,33 +432,46 @@ static void dev_flash_dump_bytes(const uint8_t *buf, int size)
 
 int flash_init(void)
 {
+    const pup_dtm_flash_device_t *flash_cfg = flash_device();
+    const pup_dtm_spi_bus_t *bus = flash_spi_bus();
+    const pup_dtm_spi_cs_t *cs = flash_spi_cs();
     sfud_err sfud_ret;
     uint8_t jedec_id[3];
     sfud_flash *flash;
     int retry;
 
+    if (!flash_cfg || !bus || !cs) {
+        printf("[driver] flash: no DTM flash config\n");
+        return -1;
+    }
+
+    if (spi_bus_init() != 0) {
+        printf("[driver] flash: SPI bus init failed\n");
+        return -1;
+    }
+
     libcm_memset(&g_dev_flash_ctx, 0, sizeof(g_dev_flash_ctx));
-    dtm_gpio_set(FLASH_CS_GPIOX, FLASH_CS_PIN, DTM_GPIO_MODE_OUT, DTM_GPIO_OTYPE_PP,
+    dtm_gpio_set(cs->gpio_base, cs->pin_mask, DTM_GPIO_MODE_OUT, DTM_GPIO_OTYPE_PP,
                  DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
     flash_cs_deselect();
 
     {
         dtm_spi_config_t spi_cfg;
-        spi_cfg.mode = DTM_SPI_MODE_0;
-        spi_cfg.datasize = DTM_SPI_DATASIZE_8BIT;
-        spi_cfg.baudrate_prescaler = DTM_SPI_BAUDRATE_PRESCALER_8;
-        spi_cfg.firstbit = 0;
+        spi_cfg.mode = flash_cfg->mode;
+        spi_cfg.datasize = flash_cfg->datasize;
+        spi_cfg.baudrate_prescaler = flash_cfg->prescaler;
+        spi_cfg.firstbit = flash_cfg->firstbit;
         spi_cfg.crc_polarity = 0;
-        dtm_spi_init(DTM_SPI2_BASE, &spi_cfg);
-        dtm_spi_enable(DTM_SPI2_BASE);
+        dtm_spi_init(bus->base, &spi_cfg);
+        dtm_spi_enable(bus->base);
     }
 
     for (retry = 0; retry < 3; retry++) {
         flash_cs_select();
-        dtm_spi_transmit_byte(DTM_SPI2_BASE, 0x9F);
-        jedec_id[0] = dtm_spi_transmit_byte(DTM_SPI2_BASE, 0xFF);
-        jedec_id[1] = dtm_spi_transmit_byte(DTM_SPI2_BASE, 0xFF);
-        jedec_id[2] = dtm_spi_transmit_byte(DTM_SPI2_BASE, 0xFF);
+        dtm_spi_transmit_byte(bus->base, 0x9F);
+        jedec_id[0] = dtm_spi_transmit_byte(bus->base, 0xFF);
+        jedec_id[1] = dtm_spi_transmit_byte(bus->base, 0xFF);
+        jedec_id[2] = dtm_spi_transmit_byte(bus->base, 0xFF);
         flash_cs_deselect();
 
         printf("[driver] flash0: JEDEC ID read attempt %d: %02x %02x %02x\n",

@@ -15,6 +15,7 @@
 #include "shared/pup_user_thread.h"
 #include "stack_guard.h"
 #include "dev_irq.h"
+#include "dtm_ofw.h"
 
 void syscall_uart_rx_init(void)
 {
@@ -914,6 +915,44 @@ static long sys_userfs_mkfs(long arg1, long arg2, long arg3, long arg4)
     return result;
 }
 
+static long sys_dtm_query(long arg1, long arg2, long arg3, long arg4)
+{
+    int query = (int)arg1;
+    void *buffer = (void *)arg2;
+    unsigned int size = (unsigned int)arg3;
+    app_process_t *app = app_get_current();
+    const void *blob;
+
+    (void)arg4;
+
+    if (!app || !buffer) {
+        return -1;
+    }
+
+    if (query == PUP_DTM_QUERY_BLOB_INFO) {
+        pup_dtm_blob_info_t *info = (pup_dtm_blob_info_t *)buffer;
+
+        if (size < sizeof(*info)) {
+            return -1;
+        }
+        if (!sys_user_range_valid(app, buffer, sizeof(*info))) {
+            PUP_LOG_ERROR(PUP_LOG_MODULE_SYSCALL,
+                          "sys_dtm_query: invalid user buffer 0x%08x",
+                          (unsigned int)buffer);
+            return -1;
+        }
+
+        blob = dtm_ofw_blob();
+        info->source = (dtm_ofw_is_ready() && blob) ? PUP_DTM_SOURCE_DTB : PUP_DTM_SOURCE_FALLBACK;
+        info->size = dtm_ofw_blob_size();
+        info->addr = (uintptr_t)blob;
+        info->flags = blob ? PUP_DTM_BLOB_FLAG_READABLE : 0U;
+        return 0;
+    }
+
+    return -1;
+}
+
 static const syscall_func_t syscall_table[] = {
     [SYS_WRITE] = sys_write,
     [SYS_READ] = sys_read,
@@ -957,6 +996,7 @@ static const syscall_func_t syscall_table[] = {
     [SYS_USERFS_MOUNT]      = sys_userfs_mount,
     [SYS_USERFS_UNMOUNT]    = sys_userfs_unmount,
     [SYS_USERFS_MKFS]       = sys_userfs_mkfs,
+    [SYS_DTM_QUERY]         = sys_dtm_query,
 };
 
 #define SYSCALL_TABLE_SIZE (sizeof(syscall_table) / sizeof(syscall_func_t))

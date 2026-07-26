@@ -4,6 +4,9 @@
 #include "dtm_uart.h"
 #include "dtm_gpio.h"
 #include "dtm_clk.h"
+#include "dtm_board.h"
+#include "dtm_of_driver.h"
+#include "libcm.h"
 #include "stdint.h"
 #include <stddef.h>
 
@@ -48,13 +51,68 @@ typedef struct
 #define USART_ISR_ORE          ((uint32_t)0x00000008)
 #define USART_ICR_ORECF        ((uint32_t)0x00000008)
 
-#define USART_X ((USART_TypeDef *)DTM_DEBUG_UART) /* Define the base address of USART1, change to DTM_UART2_BASE for USART2 */
+static uint32_t g_uart_base = DTM_DEBUG_UART;
+
+#define USART_X ((USART_TypeDef *)g_uart_base)
 
 /* UART接收回调函数指针 */
 static dtm_uart_rx_callback_t uart_rx_callback = NULL;
 
 /* 接收数据缓存 */
 static volatile uint8_t uart_rx_data = 0;
+
+static int dtm_uart_arm_m7_st_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_uart_config_t config;
+    uint64_t addr = 0;
+    uint32_t value;
+    pup_dtm_pin_t pins[2];
+    int pin_count;
+
+    if (dtm_ofw_chosen_stdout() != node ||
+        dtm_ofw_get_reg(node, 0, &addr, 0) < 0) {
+        return -1;
+    }
+
+    if (dtm_board_get_console(&config) != 0) {
+        libcm_memset(&config, 0, sizeof(config));
+    }
+
+    config.valid = 1U;
+    config.base = (uint32_t)addr;
+
+    if (dtm_ofw_prop_read_u32(node, "current-speed", &value) == 0) {
+        config.baudrate = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "interrupts", 0, &value) == 0) {
+        config.irq_num = value;
+    }
+    if (dtm_of_parse_clock_id(node, "clocks", 0, &value) == 0) {
+        config.clk_id = value;
+    }
+
+    libcm_memset(pins, 0, sizeof(pins));
+    pin_count = dtm_of_parse_pinctrl(node, pins, 2U);
+    if (pin_count >= 2) {
+        config.tx = pins[0];
+        config.rx = pins[1];
+    }
+
+    dtm_board_set_console(&config);
+    return 0;
+}
+
+static const char *const g_dtm_uart_arm_m7_st_compatibles[] = {
+    "puppy,uart-arm-m7-st",
+    "st,stm32-uart",
+};
+
+const dtm_of_driver_t g_dtm_uart_arm_m7_st_of_driver = {
+    "uart-arm-m7-st",
+    g_dtm_uart_arm_m7_st_compatibles,
+    DTM_ARRAY_SIZE(g_dtm_uart_arm_m7_st_compatibles),
+    dtm_uart_arm_m7_st_of_probe,
+};
 
 int dtm_uart_putc(char ch)
 {
@@ -64,27 +122,19 @@ int dtm_uart_putc(char ch)
     return ch;
 }
 
-/**
- * @brief       将UART基地址转换为对应的时钟ID
- * @param       uart_base: UART基地址
- * @return      对应的时钟ID
- */
 static int uart_to_clk_id(uint32_t uart_base)
 {
-    int clk_id = -1;
-    
     switch (uart_base) {
-        case DTM_UART1_BASE: clk_id = CLK_UART1; break;
-        case DTM_UART2_BASE: clk_id = CLK_UART2; break;
-        case DTM_UART3_BASE: clk_id = CLK_UART3; break;
-        case DTM_UART4_BASE: clk_id = CLK_UART4; break;
-        case DTM_UART5_BASE: clk_id = CLK_UART5; break;
-        case DTM_UART7_BASE: clk_id = CLK_UART7; break;
-        case DTM_UART8_BASE: clk_id = CLK_UART8; break;
-        default: break;
+        case DTM_UART1_BASE: return CLK_UART1;
+        case DTM_UART2_BASE: return CLK_UART2;
+        case DTM_UART3_BASE: return CLK_UART3;
+        case DTM_UART4_BASE: return CLK_UART4;
+        case DTM_UART5_BASE: return CLK_UART5;
+        case DTM_UART6_BASE: return CLK_UART6;
+        case DTM_UART7_BASE: return CLK_UART7;
+        case DTM_UART8_BASE: return CLK_UART8;
+        default: return -1;
     }
-    
-    return clk_id;
 }
 
 /**
@@ -94,36 +144,49 @@ static int uart_to_clk_id(uint32_t uart_base)
  */
 void dtm_uart_init(uint32_t baudrate)
 {
-    uint32_t pclk;
+    uint32_t pclk = 0;
     uint32_t usartdiv;
-    int clk_id;
+    int clk_id = -1;
+    pup_dtm_uart_config_t config;
+    uint32_t uart_base = DTM_DEBUG_UART;
+    pup_dtm_pin_t tx_pin = { DTM_DEBUG_UART_TX_PIN, DTM_DEBUG_UART_TX_AF, 0 };
+    pup_dtm_pin_t rx_pin = { DTM_DEBUG_UART_RX_PIN, DTM_DEBUG_UART_RX_AF, 0 };
     
-    /* Check the baud rate parameter */
-    if (baudrate == 0) {
-        return;
+    if (dtm_board_get_console(&config) == 0 && config.valid) {
+        uart_base = config.base;
+        tx_pin = config.tx;
+        rx_pin = config.rx;
+        if (config.clk_id > 0U && config.clk_id < CLK_COUNT) {
+            clk_id = (int)config.clk_id;
+        }
+        if (baudrate == 0U) {
+            baudrate = config.baudrate;
+        }
     }
+
+    if (baudrate == 0U) {
+        baudrate = 115200U;
+    }
+
+    g_uart_base = uart_base;
     
     /* IO and clock configuration */
 
-    dtm_gpio_set(DTM_DEBUG_UART_TX_PIN,
+    dtm_gpio_set(tx_pin.gpio_base, tx_pin.pin_mask,
                  DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP, DTM_GPIO_SPEED_MID, DTM_GPIO_PUPD_PU);    /* Set the mode of the TX pin */
 
-    dtm_gpio_set(DTM_DEBUG_UART_RX_PIN,
+    dtm_gpio_set(rx_pin.gpio_base, rx_pin.pin_mask,
                  DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP, DTM_GPIO_SPEED_MID, DTM_GPIO_PUPD_PU);    /* Set the mode of the RX pin */
 
-    dtm_gpio_af_set(DTM_DEBUG_UART_TX_PIN, DTM_DEBUG_UART_TX_AF);    /* Select the TX pin multiplexing function, must be set correctly */
-    dtm_gpio_af_set(DTM_DEBUG_UART_RX_PIN, DTM_DEBUG_UART_RX_AF);    /* Select the RX pin multiplexing function, must be set correctly */
+    dtm_gpio_af_set(tx_pin.gpio_base, tx_pin.pin_mask, tx_pin.af);
+    dtm_gpio_af_set(rx_pin.gpio_base, rx_pin.pin_mask, rx_pin.af);
 
     /* 使能UART时钟并获取时钟频率 */
-    clk_id = uart_to_clk_id(DTM_DEBUG_UART);
-    if (clk_id != -1) {
-        clk_enable(clk_id);
+    if (clk_id == -1) {
+        clk_id = uart_to_clk_id(g_uart_base);
+    }
+    if (clk_id != -1 && clk_enable(clk_id) == 0) {
         pclk = clk_get_rate(clk_id);  /* 获取时钟频率，单位Hz */
-    } else {
-        /* 默认值，用于兼容性 */
-        /* 默认时钟频率，根据不同芯片可能需要调整 */
-        /* UART1通常连接到APB2，其他UART通常连接到APB1 */
-        pclk = (DTM_DEBUG_UART == DTM_UART1_BASE) ? 84000000 : 42000000;
     }
 
     /* Ensure clock is valid */

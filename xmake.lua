@@ -68,7 +68,6 @@ target("puppy")
         "core/libcm/libcm.c",
         "core/dtm/chips/stm32f407/start.s"
     )
-
     add_defines("PUP_MPU_ENABLED", "_POSIX_C_SOURCE=199309L")
 
     add_includedirs(
@@ -156,9 +155,12 @@ define_user_app_target("mpu_test", {
 define_user_app_target("driver", {
     sources = {
         "apps/apps/driver/main.c",
+        "apps/apps/driver/driver_of.c",
         "apps/apps/driver/driver_gpio.c",
         "apps/apps/driver/driver_spi.c",
         "apps/apps/driver/driver_flash.c",
+        "core/dtm/ofw/dtm_ofw.c",
+        "core/dtm/ofw/dtm_of_driver.c",
         "core/dtm/ips/gpio_arm_m4_st_gd.c",
         "core/dtm/ips/clk_arm_m4_st_gd.c",
         "core/dtm/ips/spi_arm_m4_st_gd.c",
@@ -167,12 +169,14 @@ define_user_app_target("driver", {
     includes = {
         "apps/apps/driver",
         "core/dtm",
+        "core/dtm/ofw",
         "core/dtm/common",
         "core/dtm/ips",
         "core/dtm/arch/arm/cortex-m4",
         "core/dtm/chips/stm32f407",
         "apps/apps/driver/sfud/inc",
-        "core/shared"
+        "core/shared",
+        "core/libcm"
     },
     output = "driver.bin",
     stack_size = "0x800"
@@ -196,6 +200,7 @@ define_user_app_target("lfs", {
 
 target("firmware")
     set_kind("phony")
+    set_default(false)
     set_toolchains("arm-none-eabi")
     set_arch("cortex-m4")
     set_plat("cross")
@@ -251,6 +256,7 @@ target("puppy-m7")
         "core/libcm/libcm.c",
         "core/dtm/chips/stm32h743/start.s"
     )
+    remove_files("core/dtm/boards/generated/*.c")
 
     add_defines("PUP_MPU_ENABLED", "_POSIX_C_SOURCE=199309L")
 
@@ -351,18 +357,23 @@ define_user_app_target_m7("mpu_test-m7", {
 define_user_app_target_m7("driver-m7", {
     sources = {
         "apps/apps/driver/main.c",
+        "apps/apps/driver/driver_of.c",
         "apps/apps/driver/driver_gpio.c",
+        "core/dtm/ofw/dtm_ofw.c",
+        "core/dtm/ofw/dtm_of_driver.c",
         "core/dtm/ips/gpio_arm_m4_st_gd.c",
         "core/dtm/ips/clk_arm_m7_st.c"
     },
     includes = {
         "apps/apps/driver",
         "core/dtm",
+        "core/dtm/ofw",
         "core/dtm/common",
         "core/dtm/ips",
         "core/dtm/arch/arm/cortex-m7",
         "core/dtm/chips/stm32h743",
-        "core/shared"
+        "core/shared",
+        "core/libcm"
     },
     defines = {
         "DTM_NO_SPI_FLASH=1"
@@ -389,6 +400,7 @@ define_user_app_target_m7("lfs-m7", {
 
 target("firmware-m7")
     set_kind("phony")
+    set_default(false)
     set_toolchains("arm-none-eabi")
     set_arch("cortex-m7")
     set_plat("cross")

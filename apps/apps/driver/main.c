@@ -1,12 +1,10 @@
 #include "libc.h"
 #include "syscall.h"
-#include "dtm_gpio.h"
-#include "dtm_bindings.h"
 #include "shared/pup_devfs_proto.h"
 #include "shared/pup_driver_abi.h"
 #include "driver_gpio.h"
+#include "driver_of.h"
 #ifndef DTM_NO_SPI_FLASH
-#include "dtm_spi.h"
 #include "shared/pup_spi.h"
 #include "driver_spi.h"
 #include "driver_flash.h"
@@ -47,9 +45,12 @@ static void gpio_service_loop(void)
             int ret;
 
 #ifndef DTM_NO_SPI_FLASH
-            if (req->device_id == SPI_DEVICE_ID) {
+            const pup_dtm_spi_bus_t *bus = spi_bus();
+            const pup_dtm_flash_device_t *flash = flash_device();
+
+            if (bus && req->device_id == bus->device_id) {
                 ret = spi_handle_request(req);
-            } else if (req->device_id == FLASH_DEVICE_ID) {
+            } else if (flash && req->device_id == flash->device_id) {
                 ret = flash_handle_request(req);
             } else
 #endif
@@ -64,11 +65,38 @@ static void gpio_service_loop(void)
 
 void app_main(const char* arg)
 {
+    const dtm_of_driver_t *of_drivers[] = {
+        &g_gpio_of_driver,
+#ifndef DTM_NO_SPI_FLASH
+        &g_spi_of_driver,
+        &g_flash_of_driver,
+#endif
+    };
     int i;
 
     (void)arg;
 
     printf("[driver] start\n");
+
+    if (driver_of_init() != 0) {
+        printf("[driver] OF init failed\n");
+        pthread_exit((void*)-1);
+    }
+
+    gpio_resources_init();
+#ifndef DTM_NO_SPI_FLASH
+    spi_resources_init();
+    flash_resources_init();
+#endif
+    if (driver_of_is_ready()) {
+        dtm_of_probe_all(of_drivers, DTM_ARRAY_SIZE(of_drivers));
+    }
+
+    if (g_dev_count <= 0) {
+        printf("[driver] no GPIO devices configured\n");
+        pthread_exit((void*)-1);
+    }
+    printf("[driver] GPIO devices loaded: %d\n", g_dev_count);
 
     gpio_irq_config();
 
@@ -78,7 +106,7 @@ void app_main(const char* arg)
         pthread_exit((void*)-1);
     }
 
-    for (i = 0; i < GPIO_DEV_COUNT; i++) {
+    for (i = 0; i < g_dev_count; i++) {
         if (gpio_register_one(&g_devs[i]) != 0) {
             printf("[driver] failed at index=%d\n", i);
             pup_channel_destroy(g_server_channel);
@@ -88,50 +116,33 @@ void app_main(const char* arg)
 
     {
         pup_user_irq_subscription_t sub;
-        sub.irq_num = PUP_IRQ_EXTI9_5;
+        sub.irq_num = gpio_key_irq_num();
         sub.flags = 0;
         sub.channel_id = g_server_channel;
         sub.reserved1 = 0;
-        g_key_irq_handle = irq_subscribe(&sub);
-        if (g_key_irq_handle < 0) {
-            printf("[driver] irq_subscribe failed for EXTI9_5\n");
+        if (sub.irq_num == 0U) {
+            printf("[driver] no key IRQ configured\n");
         } else {
-            printf("[driver] irq subscribed: EXTI9_5 handle=%d\n", g_key_irq_handle);
+            g_key_irq_handle = irq_subscribe(&sub);
+            if (g_key_irq_handle < 0) {
+                printf("[driver] irq_subscribe failed for irq=%u\n", (unsigned int)sub.irq_num);
+            } else {
+                printf("[driver] irq subscribed: irq=%u handle=%d\n",
+                       (unsigned int)sub.irq_num,
+                       g_key_irq_handle);
+            }
         }
     }
 
 #ifndef DTM_NO_SPI_FLASH
-    /* Initialize SPI2 and register /dev/spi2 */
     {
-        dtm_spi_config_t spi_cfg;
-
-        dtm_gpio_set(GPIOC, DTM_GPIO_PIN2, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
-                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
-        dtm_gpio_af_set(GPIOC, DTM_GPIO_PIN2, 5);
-
-        dtm_gpio_set(GPIOC, DTM_GPIO_PIN3, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
-                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
-        dtm_gpio_af_set(GPIOC, DTM_GPIO_PIN3, 5);
-
-        dtm_gpio_set(GPIOB, DTM_GPIO_PIN13, DTM_GPIO_MODE_AF, DTM_GPIO_OTYPE_PP,
-                     DTM_GPIO_SPEED_HIGH, DTM_GPIO_PUPD_PU);
-        dtm_gpio_af_set(GPIOB, DTM_GPIO_PIN13, 5);
-
-        spi_cfg.mode = DTM_SPI_MODE_0;
-        spi_cfg.datasize = DTM_SPI_DATASIZE_8BIT;
-        spi_cfg.baudrate_prescaler = DTM_SPI_BAUDRATE_PRESCALER_128;
-        spi_cfg.firstbit = 0;
-        spi_cfg.crc_polarity = 0;
-        dtm_spi_init(DTM_SPI2_BASE, &spi_cfg);
-        dtm_spi_enable(DTM_SPI2_BASE);
-        printf("[driver] SPI2 initialized\n");
-
-        if (spi_register_one() != 0) {
-            printf("[driver] SPI2 registration failed, continuing without SPI\n");
+        if (spi_bus() == 0) {
+            printf("[driver] no SPI bus configured\n");
+        } else if (spi_bus_init() != 0 || spi_register_one() != 0) {
+            printf("[driver] SPI registration failed, continuing without SPI\n");
         }
     }
 
-    /* Initialize flash driver and register /dev/flash0 */
     {
         int flash_ret = flash_init();
         if (flash_ret != 0) {

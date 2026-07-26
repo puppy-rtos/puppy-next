@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include "../common/dtm_clk.h"
 #include "../common/dtm_uart.h"
+#include "../common/dtm_board.h"
+#include "../common/dtm_of_driver.h"
 
 /* RCC寄存器结构定义 */
 typedef struct
@@ -47,8 +49,10 @@ typedef struct
 #define DTM_CLK_BASE 0x40023800UL
 #endif
 
-#define RCC ((DTM_RCC_Type *)DTM_CLK_BASE)
+static uint32_t g_rcc_base = DTM_CLK_BASE;
 
+#define RCC ((DTM_RCC_Type *)g_rcc_base)
+#define RCC_INIT_REG(member) (&((DTM_RCC_Type *)DTM_CLK_BASE)->member)
 /* 寄存器位定义 */
 #define RCC_CR_HSION      (1 << 0)
 #define RCC_CR_HSEON      (1 << 16)
@@ -112,6 +116,161 @@ static const struct clk_ops fixed_clk_ops = {
     .disable = fixed_clk_disable,
     .set_parent = fixed_clk_set_parent,
     .set_rate = fixed_clk_set_rate,
+};
+
+static void dtm_clk_apply_gate(uint32_t clk_id,
+                               uint32_t parent_id,
+                               uint32_t enable_offset,
+                               uint32_t enable_bit)
+{
+    if (clk_id >= CLK_COUNT || enable_bit >= 32U) {
+        return;
+    }
+
+    if (parent_id < CLK_COUNT) {
+        dtm_clks[clk_id].parent = (int)parent_id;
+    }
+    dtm_clks[clk_id].enr_reg = (volatile uint32_t *)(uintptr_t)(g_rcc_base + enable_offset);
+    dtm_clks[clk_id].enr_bit = 1UL << enable_bit;
+}
+
+static void dtm_clk_parse_gate_nodes(dtm_ofw_node_t controller)
+{
+    dtm_ofw_node_t child = DTM_OFW_NODE_INVALID;
+
+    while ((child = dtm_ofw_get_next_child(controller, child)) >= 0) {
+        uint32_t clk_id;
+        uint32_t parent_id;
+        uint32_t enable_offset;
+        uint32_t enable_bit;
+
+        if (!dtm_ofw_node_is_available(child) ||
+            !dtm_ofw_node_is_compatible(child, "puppy,clock-gate")) {
+            continue;
+        }
+
+        if (dtm_ofw_prop_read_u32(child, "puppy,clock-id", &clk_id) < 0 ||
+            dtm_ofw_prop_read_u32(child, "puppy,enable-reg", &enable_offset) < 0 ||
+            dtm_ofw_prop_read_u32(child, "puppy,enable-bit", &enable_bit) < 0) {
+            continue;
+        }
+
+        if (dtm_ofw_prop_read_u32(child, "puppy,parent-clock", &parent_id) < 0) {
+            parent_id = CLK_COUNT;
+        }
+
+        dtm_clk_apply_gate(clk_id, parent_id, enable_offset, enable_bit);
+    }
+}
+
+static void dtm_clk_apply_default_register_refs(void);
+
+static int dtm_clk_arm_m4_st_gd_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_clock_config_t config;
+    uint64_t addr = 0;
+    uint32_t value;
+
+    if (dtm_board_get_clock(&config) != 0) {
+        return -1;
+    }
+
+    if (dtm_ofw_get_reg(node, 0, &addr, 0) == 0) {
+        config.valid = 1U;
+        config.base = (uint32_t)addr;
+        g_rcc_base = config.base;
+    }
+
+    if (dtm_ofw_prop_read_u32(node, "hse-frequency", &value) == 0) {
+        config.hse_frequency = value;
+    }
+    if (dtm_ofw_prop_read_u32(node, "clock-frequency", &value) == 0) {
+        config.sysclk_frequency = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,pll", 0, &value) == 0) {
+        config.pll_m = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,pll", 1, &value) == 0) {
+        config.pll_n = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,pll", 2, &value) == 0) {
+        config.pll_p = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,pll", 3, &value) == 0) {
+        config.pll_q = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,bus-dividers", 0, &value) == 0) {
+        config.hclk_divider = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,bus-dividers", 1, &value) == 0) {
+        config.pclk1_divider = value;
+    }
+    if (dtm_ofw_prop_read_u32_index(node, "puppy,bus-dividers", 2, &value) == 0) {
+        config.pclk2_divider = value;
+    }
+
+    dtm_clk_parse_gate_nodes(node);
+    dtm_clk_apply_default_register_refs();
+    dtm_board_set_clock(&config);
+    return 0;
+}
+
+static void dtm_clk_apply_default_register_refs(void)
+{
+    /* Bind every peripheral clock to its RCC enable register. Any entry that
+     * already has a DTS-driven override keeps that value, so DTS still wins. */
+    if (g_rcc_base == 0U) {
+        return;
+    }
+    if (dtm_clks[CLK_GPIOA].enr_reg == NULL) dtm_clks[CLK_GPIOA].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOB].enr_reg == NULL) dtm_clks[CLK_GPIOB].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOC].enr_reg == NULL) dtm_clks[CLK_GPIOC].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOD].enr_reg == NULL) dtm_clks[CLK_GPIOD].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOE].enr_reg == NULL) dtm_clks[CLK_GPIOE].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOF].enr_reg == NULL) dtm_clks[CLK_GPIOF].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOG].enr_reg == NULL) dtm_clks[CLK_GPIOG].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOH].enr_reg == NULL) dtm_clks[CLK_GPIOH].enr_reg = &RCC->AHB1ENR;
+    if (dtm_clks[CLK_GPIOI].enr_reg == NULL) dtm_clks[CLK_GPIOI].enr_reg = &RCC->AHB1ENR;
+
+    if (dtm_clks[CLK_UART1].enr_reg == NULL) dtm_clks[CLK_UART1].enr_reg = &RCC->APB2ENR;
+    if (dtm_clks[CLK_UART2].enr_reg == NULL) dtm_clks[CLK_UART2].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_UART3].enr_reg == NULL) dtm_clks[CLK_UART3].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_UART4].enr_reg == NULL) dtm_clks[CLK_UART4].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_UART5].enr_reg == NULL) dtm_clks[CLK_UART5].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_UART6].enr_reg == NULL) dtm_clks[CLK_UART6].enr_reg = &RCC->APB2ENR;
+    if (dtm_clks[CLK_UART7].enr_reg == NULL) dtm_clks[CLK_UART7].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_UART8].enr_reg == NULL) dtm_clks[CLK_UART8].enr_reg = &RCC->APB1ENR;
+
+    if (dtm_clks[CLK_TIM1].enr_reg == NULL)  dtm_clks[CLK_TIM1].enr_reg  = &RCC->APB2ENR;
+    if (dtm_clks[CLK_TIM2].enr_reg == NULL)  dtm_clks[CLK_TIM2].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM3].enr_reg == NULL)  dtm_clks[CLK_TIM3].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM4].enr_reg == NULL)  dtm_clks[CLK_TIM4].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM5].enr_reg == NULL)  dtm_clks[CLK_TIM5].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM6].enr_reg == NULL)  dtm_clks[CLK_TIM6].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM7].enr_reg == NULL)  dtm_clks[CLK_TIM7].enr_reg  = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM8].enr_reg == NULL)  dtm_clks[CLK_TIM8].enr_reg  = &RCC->APB2ENR;
+    if (dtm_clks[CLK_TIM9].enr_reg == NULL)  dtm_clks[CLK_TIM9].enr_reg  = &RCC->APB2ENR;
+    if (dtm_clks[CLK_TIM10].enr_reg == NULL) dtm_clks[CLK_TIM10].enr_reg = &RCC->APB2ENR;
+    if (dtm_clks[CLK_TIM11].enr_reg == NULL) dtm_clks[CLK_TIM11].enr_reg = &RCC->APB2ENR;
+    if (dtm_clks[CLK_TIM12].enr_reg == NULL) dtm_clks[CLK_TIM12].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM13].enr_reg == NULL) dtm_clks[CLK_TIM13].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_TIM14].enr_reg == NULL) dtm_clks[CLK_TIM14].enr_reg = &RCC->APB1ENR;
+
+    if (dtm_clks[CLK_SPI1].enr_reg == NULL) dtm_clks[CLK_SPI1].enr_reg = &RCC->APB2ENR;
+    if (dtm_clks[CLK_SPI2].enr_reg == NULL) dtm_clks[CLK_SPI2].enr_reg = &RCC->APB1ENR;
+    if (dtm_clks[CLK_SPI3].enr_reg == NULL) dtm_clks[CLK_SPI3].enr_reg = &RCC->APB1ENR;
+}
+
+static const char *const g_dtm_clk_arm_m4_st_gd_compatibles[] = {
+    "puppy,clk-arm-m4-st-gd",
+    "st,stm32f4-rcc",
+};
+
+const dtm_of_driver_t g_dtm_clk_arm_m4_st_gd_of_driver = {
+    "clk-arm-m4-st-gd",
+    g_dtm_clk_arm_m4_st_gd_compatibles,
+    DTM_ARRAY_SIZE(g_dtm_clk_arm_m4_st_gd_compatibles),
+    dtm_clk_arm_m4_st_gd_of_probe,
 };
 
 /* PLL时钟操作函数 */
@@ -427,7 +586,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpioa",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 0,    // GPIOA 时钟使能位
         .enabled = 0,
     },
@@ -435,7 +594,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpiob",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 1,    // GPIOB 时钟使能位
         .enabled = 0,
     },
@@ -443,7 +602,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpioc",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 2,    // GPIOC 时钟使能位
         .enabled = 0,
     },
@@ -451,7 +610,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpiod",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 3,    // GPIOD 时钟使能位
         .enabled = 0,
     },
@@ -459,7 +618,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpioe",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 4,    // GPIOE 时钟使能位
         .enabled = 0,
     },
@@ -467,7 +626,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpiof",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 5,    // GPIOF 时钟使能位
         .enabled = 0,
     },
@@ -475,7 +634,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpiog",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 6,    // GPIOG 时钟使能位
         .enabled = 0,
     },
@@ -483,7 +642,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpioh",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 7,    // GPIOH 时钟使能位
         .enabled = 0,
     },
@@ -491,7 +650,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "gpioi",
         .parent = CLK_HCLK,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->AHB1ENR,
+        .enr_reg = RCC_INIT_REG(AHB1ENR),
         .enr_bit = 1 << 8,    // GPIOI 时钟使能位
         .enabled = 0,
     },
@@ -500,7 +659,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart1",
         .parent = CLK_PCLK2,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
+        .enr_reg = RCC_INIT_REG(APB2ENR),
         .enr_bit = 1 << 4,    // UART1 时钟使能位
         .enabled = 0,
     },
@@ -508,7 +667,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart2",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 17,   // UART2 时钟使能位
         .enabled = 0,
     },
@@ -516,7 +675,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart3",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 18,   // UART3 时钟使能位
         .enabled = 0,
     },
@@ -524,7 +683,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart4",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 19,   // UART4 时钟使能位
         .enabled = 0,
     },
@@ -532,7 +691,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart5",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 20,   // UART5 时钟使能位
         .enabled = 0,
     },
@@ -540,7 +699,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart6",
         .parent = CLK_PCLK2,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
+        .enr_reg = RCC_INIT_REG(APB2ENR),
         .enr_bit = 1 << 5,    // UART6 时钟使能位
         .enabled = 0,
     },
@@ -548,7 +707,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart7",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 30,   // UART7 时钟使能位
         .enabled = 0,
     },
@@ -556,7 +715,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "uart8",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 31,   // UART8 时钟使能位
         .enabled = 0,
     },
@@ -565,7 +724,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim1",
         .parent = CLK_PCLK2,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
         .enr_bit = 1 << 0,    // TIM1 时钟使能位
         .enabled = 0,
     },
@@ -573,7 +731,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim2",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 0,    // TIM2 时钟使能位
         .enabled = 0,
     },
@@ -581,7 +738,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim3",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 1,    // TIM3 时钟使能位
         .enabled = 0,
     },
@@ -589,7 +745,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim4",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 2,    // TIM4 时钟使能位
         .enabled = 0,
     },
@@ -597,7 +752,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim5",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 3,    // TIM5 时钟使能位
         .enabled = 0,
     },
@@ -605,7 +759,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim6",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 4,    // TIM6 时钟使能位
         .enabled = 0,
     },
@@ -613,7 +766,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim7",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 5,    // TIM7 时钟使能位
         .enabled = 0,
     },
@@ -621,7 +773,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim8",
         .parent = CLK_PCLK2,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
         .enr_bit = 1 << 1,    // TIM8 时钟使能位
         .enabled = 0,
     },
@@ -629,7 +780,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim9",
         .parent = CLK_PCLK2,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
         .enr_bit = 1 << 16,   // TIM9 时钟使能位
         .enabled = 0,
     },
@@ -637,7 +787,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim10",
         .parent = CLK_PCLK2,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
         .enr_bit = 1 << 17,   // TIM10 时钟使能位
         .enabled = 0,
     },
@@ -645,7 +794,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim11",
         .parent = CLK_PCLK2,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
         .enr_bit = 1 << 18,   // TIM11 时钟使能位
         .enabled = 0,
     },
@@ -653,7 +801,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim12",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 6,    // TIM12 时钟使能位
         .enabled = 0,
     },
@@ -661,7 +808,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim13",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 7,    // TIM13 时钟使能位
         .enabled = 0,
     },
@@ -669,7 +815,6 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "tim14",
         .parent = CLK_PCLK1,
         .ops = &timer_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
         .enr_bit = 1 << 8,    // TIM14 时钟使能位
         .enabled = 0,
     },
@@ -678,7 +823,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "spi1",
         .parent = CLK_PCLK2,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB2ENR,
+        .enr_reg = RCC_INIT_REG(APB2ENR),
         .enr_bit = 1 << 12,   // SPI1 时钟使能位
         .enabled = 0,
     },
@@ -686,7 +831,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "spi2",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 14,   // SPI2 时钟使能位
         .enabled = 0,
     },
@@ -694,7 +839,7 @@ struct clk_desc dtm_clks[CLK_COUNT] = {
         .name = "spi3",
         .parent = CLK_PCLK1,
         .ops = &peri_clk_ops,
-        .enr_reg = &RCC->APB1ENR,
+        .enr_reg = RCC_INIT_REG(APB1ENR),
         .enr_bit = 1 << 15,   // SPI3 时钟使能位
         .enabled = 0,
     },
@@ -872,14 +1017,42 @@ void dtm_clk_dumptree(void)
     dtm_printf("APB2 divider: %lu\n", dtm_clks[CLK_PCLK2].div);
 }
 
-/**
- * @brief       Initialize the system clock to 168MHz
- * @note        This function configures the system clock to 168MHz using the PLL.
- *              It also enables the clocks for GPIOA, GPIOF, USART1, and USART2.
- * @retval      None
- */
 void dtm_clk_init(void)
 {
+    pup_dtm_clock_config_t board_clock;
+
+    if (dtm_board_get_clock(&board_clock) == 0) {
+        if (board_clock.base != 0U) {
+            g_rcc_base = board_clock.base;
+        }
+        if (board_clock.hse_frequency != 0U) {
+            dtm_clks[CLK_HSE].freq = board_clock.hse_frequency;
+        }
+        if (board_clock.pll_m != 0U) {
+            dtm_clks[CLK_PLL].pllm = board_clock.pll_m;
+        }
+        if (board_clock.pll_n != 0U) {
+            dtm_clks[CLK_PLL].plln = board_clock.pll_n;
+        }
+        if (board_clock.pll_p != 0U) {
+            dtm_clks[CLK_PLL].pllp = board_clock.pll_p;
+        }
+        if (board_clock.pll_q != 0U) {
+            dtm_clks[CLK_PLL].pllq = board_clock.pll_q;
+        }
+        if (board_clock.hclk_divider != 0U) {
+            dtm_clks[CLK_HCLK].div = board_clock.hclk_divider;
+        }
+        if (board_clock.pclk1_divider != 0U) {
+            dtm_clks[CLK_PCLK1].div = board_clock.pclk1_divider;
+        }
+        if (board_clock.pclk2_divider != 0U) {
+            dtm_clks[CLK_PCLK2].div = board_clock.pclk2_divider;
+        }
+    }
+
+    dtm_clk_apply_default_register_refs();
+
     /* Initialize the system clock to 168MHz */
     sys_stm32_clock_init(); /* Set PLL1 parameters for 168MHz system clock */
 
@@ -909,6 +1082,7 @@ uint32_t clk_get_rate(int clk_id)
 int clk_enable(int clk_id)
 {
     if (clk_id >= 0 && clk_id < CLK_COUNT) {
+        dtm_clk_apply_default_register_refs();
         return dtm_clks[clk_id].ops->enable(&dtm_clks[clk_id]);
     }
     return -1;
@@ -922,6 +1096,7 @@ int clk_enable(int clk_id)
 int clk_disable(int clk_id)
 {
     if (clk_id >= 0 && clk_id < CLK_COUNT) {
+        dtm_clk_apply_default_register_refs();
         return dtm_clks[clk_id].ops->disable(&dtm_clks[clk_id]);
     }
     return -1;

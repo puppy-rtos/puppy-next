@@ -420,11 +420,38 @@ int strcmp(const char* s1, const char* s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
+size_t libcm_strlen(const char* s) {
+    return strlen(s);
+}
+
+char* libcm_strncpy(char* dest, const char* src, size_t n) {
+    char* ret = dest;
+
+    while (n && *src) {
+        *dest++ = *src++;
+        n--;
+    }
+    while (n) {
+        *dest++ = '\0';
+        n--;
+    }
+
+    return ret;
+}
+
+int libcm_strcmp(const char* s1, const char* s2) {
+    return strcmp(s1, s2);
+}
+
 void* libcm_memset(void* s, int c, size_t n) {
     unsigned char* p = s;
     while (n--)
         *p++ = (unsigned char)c;
     return s;
+}
+
+void* libcm_memcpy(void* dest, const void* src, size_t n) {
+    return memcpy(dest, src, n);
 }
 
 void* memcpy(void* dest, const void* src, size_t n) {

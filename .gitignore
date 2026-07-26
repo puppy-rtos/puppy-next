@@ -1,5 +1,6 @@
 /build
 /.xmake
+/output
 *.bin
 *.map
 doxyfile

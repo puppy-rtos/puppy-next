@@ -15,9 +15,10 @@
 #include "pup_userfs.h"
 #include "dev_uart.h"
 #include "dev_irq.h"
-#include "dev_spi.h"
 #include "dtm_pmctrl.h"
 #include "dtm_flash.h"
+#include "dtm_ofw.h"
+#include "dtm_board.h"
 #include "app_loader.h"
 #include "puppy_log.h"
 #include "syscall.h"
@@ -30,11 +31,17 @@ int libcm_console_output(const char *str, int len)
 
 int puppy_board_init(void)
 {
+    int ofw_ret = dtm_ofw_init_default();
+
+    dtm_board_init();
     dtm_pmctrl_init();
     dtm_flash_init();
     dtm_clk_init();
-    dtm_uart_init(115200);
+    dtm_uart_init(0);
     pup_console_init();
+    if (ofw_ret == DTM_OFW_OK) {
+        PUP_LOG_INFO(PUP_LOG_MODULE_DEV, "DTB parsed successfully");
+    }
     dtm_delay_init();
     dtm_delay_set_periodic(pup_tick_inc, 1000);
 
@@ -71,8 +78,6 @@ void *puppy_main_thread(void *arg) {
     dev_uart_init();
     /* GPIO/LED/KEY are served by user-mode driver (Channel+Pulse path). */
     dev_irq_init();
-    /* SPI2 is served by user-mode driver; kernel spi2 init disabled. */
-    /* dev_spi_init(); */
 
     PUP_LOG_INFO(PUP_LOG_MODULE_FS, "Registering romfs");
     pup_romfs_init();

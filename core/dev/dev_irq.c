@@ -1,6 +1,8 @@
 #include "dev_irq.h"
 #include "puppy_log.h"
 #include "dtm_irq.h"
+#include "dtm_board.h"
+#include "dtm_of_driver.h"
 #include "app_manager.h"
 #include "pup_channel.h"
 #include <libcm.h>
@@ -192,8 +194,6 @@ int dev_irq_control(unsigned int irq_num, int cmd, int value, int owner_pid)
 /* STM32F407 EXTI9_5 IRQ number in NVIC external IRQ space. */
 #define GPIO_KEY0_EXTI_IRQ_NUM 23U
 
-/* Key0 is PC5; EXTI line 5 routed through SYSCFG EXTICR2[7:4]. */
-#define GPIO_KEY0_EXTI_LINE_BIT   (1U << 5)
 #define EXTI_BASE_ADDR            0x40013C00UL
 
 typedef struct {
@@ -205,14 +205,137 @@ typedef struct {
     volatile uint32_t PR;
 } pup_exti_regs_t;
 
+static void dev_irq_get_key_exti(pup_dtm_exti_config_t *config)
+{
+    if (!config) {
+        return;
+    }
+
+    if (dtm_board_get_key_exti(config) == 0 && config->valid) {
+        return;
+    }
+
+    config->valid = 1U;
+    config->exti_base = EXTI_BASE_ADDR;
+    config->irq_num = GPIO_KEY0_EXTI_IRQ_NUM;
+    config->line = 5U;
+    config->priority = 2U;
+}
+
+static int dev_irq_syscfg_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_exti_config_t config;
+    uint64_t addr = 0;
+
+    if (dtm_ofw_get_reg(node, 0, &addr, 0) < 0 ||
+        dtm_board_get_key_exti(&config) != 0) {
+        return -1;
+    }
+
+    config.syscfg_base = (uint32_t)addr;
+    dtm_board_set_key_exti(&config);
+    return 0;
+}
+
+static int dev_irq_exti_controller_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_exti_config_t config;
+    uint64_t addr = 0;
+    uint32_t value;
+
+    if (dtm_board_get_key_exti(&config) != 0) {
+        return -1;
+    }
+
+    if (dtm_ofw_get_reg(node, 0, &addr, 0) == 0) {
+        config.exti_base = (uint32_t)addr;
+    }
+    if (dtm_ofw_prop_read_u32(node, "puppy,priority", &value) == 0) {
+        config.priority = value;
+    }
+
+    dtm_board_set_key_exti(&config);
+    return 0;
+}
+
+static int dev_irq_gpio_key_of_probe(dtm_ofw_node_t node)
+{
+    pup_dtm_exti_config_t config;
+    uint32_t value;
+
+    if (dtm_board_get_key_exti(&config) != 0) {
+        return -1;
+    }
+
+    config.valid = 1U;
+    if (dtm_ofw_prop_read_u32_index(node, "interrupts", 0, &value) == 0) {
+        config.irq_num = value;
+    }
+    if (dtm_ofw_prop_read_u32(node, "puppy,exti-line", &value) == 0) {
+        config.line = value;
+    }
+    if (dtm_ofw_prop_read_u32(node, "puppy,exti-port", &value) == 0) {
+        config.port = value;
+    }
+    if (dtm_ofw_prop_read_u32(node, "puppy,irq-priority", &value) == 0) {
+        config.priority = value;
+    }
+
+    dtm_board_set_key_exti(&config);
+    return 0;
+}
+
+static const char *const g_dev_irq_syscfg_compatibles[] = {
+    "st,stm32-syscfg",
+};
+
+const dtm_of_driver_t g_dev_irq_syscfg_of_driver = {
+    "syscfg",
+    g_dev_irq_syscfg_compatibles,
+    DTM_ARRAY_SIZE(g_dev_irq_syscfg_compatibles),
+    dev_irq_syscfg_of_probe,
+};
+
+static const char *const g_dev_irq_exti_controller_compatibles[] = {
+    "st,stm32-exti",
+};
+
+const dtm_of_driver_t g_dev_irq_exti_controller_of_driver = {
+    "exti",
+    g_dev_irq_exti_controller_compatibles,
+    DTM_ARRAY_SIZE(g_dev_irq_exti_controller_compatibles),
+    dev_irq_exti_controller_of_probe,
+};
+
+static const char *const g_dev_irq_gpio_key_compatibles[] = {
+    "puppy,gpio-key",
+};
+
+const dtm_of_driver_t g_dev_irq_gpio_key_of_driver = {
+    "gpio-key-irq",
+    g_dev_irq_gpio_key_compatibles,
+    DTM_ARRAY_SIZE(g_dev_irq_gpio_key_compatibles),
+    dev_irq_gpio_key_of_probe,
+};
+
 void EXTI9_5_IRQHandler(void)
 {
-    pup_exti_regs_t *exti = (pup_exti_regs_t *)EXTI_BASE_ADDR;
+    pup_dtm_exti_config_t config;
+    pup_exti_regs_t *exti;
+    uint32_t line_bit;
 
-    if (exti->PR & GPIO_KEY0_EXTI_LINE_BIT) {
+    dev_irq_get_key_exti(&config);
+    if (config.line >= 32U || config.exti_base == 0U) {
+        return;
+    }
+
+    exti = (pup_exti_regs_t *)config.exti_base;
+    line_bit = 1U << config.line;
+
+    if (exti->PR & line_bit) {
         /* Clear pending first, then notify user-space IRQ subscribers. */
-        exti->PR = GPIO_KEY0_EXTI_LINE_BIT;
-        dev_irq_notify(GPIO_KEY0_EXTI_IRQ_NUM);
+        exti->PR = line_bit;
+        dev_irq_notify(config.irq_num);
     }
 }
 
@@ -222,8 +345,12 @@ void EXTI9_5_IRQHandler(void)
 
 int dev_irq_init(void)
 {
+    pup_dtm_exti_config_t config;
+
+    dev_irq_get_key_exti(&config);
     PUP_LOG_INFO(PUP_LOG_MODULE_DEV,
-                 "IRQ driver initialized: EXTI line5 -> irq=%u",
-                 (unsigned int)GPIO_KEY0_EXTI_IRQ_NUM);
+                 "IRQ driver initialized: EXTI line%u -> irq=%u",
+                 (unsigned int)config.line,
+                 (unsigned int)config.irq_num);
     return 0;
 }

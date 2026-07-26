@@ -676,10 +676,10 @@ static int test_devfs(void)
     printf("\n--- Test 4: Open GPIO device ---\n");
     fd = open("/dev/gpio0", O_RDWR);
     if (fd < 0) {
-        printf("Failed to open gpio0, fd=%d\n", fd);
+        printf("Failed to open /dev/gpio0, fd=%d\n", fd);
         goto fail;
     }
-    printf("Opened gpio0, fd=%d\n", fd);
+    printf("Opened /dev/gpio0, fd=%d\n", fd);
 
     printf("\n--- Test 5: GPIO write/read ---\n");
     *shm_val = 1;
@@ -694,7 +694,7 @@ static int test_devfs(void)
     printf("Read GPIO value: %d\n", *shm_read);
 
     close(fd);
-    printf("Closed gpio0\n");
+    printf("Closed /dev/gpio0\n");
 
     printf("\nDevFS test completed\n");
     shared_free(shm_msg); shared_free(shm_val); shared_free(shm_read);
@@ -779,11 +779,12 @@ static int test_led(void)
     int fd;
     char *shm_high = (char *)PUP_NULL;
     char *shm_low  = (char *)PUP_NULL;
+    const char *dev_path = "/dev/led0";
     int cycles = 3;
     int i;
 
-    printf("\n=== LED Test (PF11) ===\n");
-    printf("Blinking /dev/led0 at 1Hz for 3 seconds...\n");
+    printf("\n=== LED Test (%s) ===\n", dev_path);
+    printf("Blinking %s at 1Hz for 3 seconds...\n", dev_path);
 
     shm_high = (char *)shared_malloc(1);
     shm_low  = (char *)shared_malloc(1);
@@ -796,9 +797,9 @@ static int test_led(void)
     *shm_high = 1;
     *shm_low  = 0;
 
-    fd = open("/dev/led0", O_RDWR);
+    fd = open(dev_path, O_RDWR);
     if (fd < 0) {
-        printf("Failed to open /dev/led0, fd=%d\n", fd);
+        printf("Failed to open %s, fd=%d\n", dev_path, fd);
         shared_free(shm_high); shared_free(shm_low);
         return -1;
     }
@@ -823,9 +824,10 @@ static int test_key0(void)
     int last_state = -1;
     int elapsed_ms = 0;
     char *shm_value = (char *)PUP_NULL;
+    const char *dev_path = "/dev/key0";
 
-    printf("\n=== KEY0 Test (PC5) ===\n");
-    printf("Reading /dev/key0 for 5 seconds...\n");
+    printf("\n=== KEY Test (%s) ===\n", dev_path);
+    printf("Reading %s for 5 seconds...\n", dev_path);
 
     shm_value = (char *)shared_malloc(1);
     if (!shm_value) {
@@ -833,9 +835,9 @@ static int test_key0(void)
         return -1;
     }
 
-    fd = open("/dev/key0", O_RDONLY);
+    fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
-        printf("Failed to open /dev/key0, fd=%d\n", fd);
+        printf("Failed to open %s, fd=%d\n", dev_path, fd);
         shared_free(shm_value);
         return -1;
     }
@@ -1222,7 +1224,8 @@ static int test_driver_chain(void)
     fd_key = open("/dev/key0", O_RDONLY);
 
     if (fd_gpio < 0 || fd_led < 0 || fd_key < 0) {
-        printf("[driver] open failed: gpio=%d led=%d key=%d\n", fd_gpio, fd_led, fd_key);
+        printf("[driver] open failed: gpio=%d led=%d key=%d\n",
+               fd_gpio, fd_led, fd_key);
         close(fd_gpio); close(fd_led); close(fd_key);
         shared_free(shm_dir); shared_free(shm_val); shared_free(shm_key);
         return -1;
@@ -1879,8 +1882,8 @@ static const test_cmd_t test_cmds[] = {
     {"devfs", "Test device file system", test_devfs},
     {"romfs", "Test ROMFS file listing", test_romfs},
     {"fs", "Test UserFS/littlefs file operations", test_fs},
-    {"led", "Blink PF11 at 500Hz for 3 seconds", test_led},
-    {"key", "Read PC5 key0 status for 5 seconds", test_key0},
+    {"led", "Blink configured LED device for 3 seconds", test_led},
+    {"key", "Read configured key device for 5 seconds", test_key0},
     {"sem", "Test named semaphore wait/post/close", test_sem},
     {"channel", "Test pup_channel_call/pup_channel_receive ping-pong", test_channel_pingpong},
     {"spi", "Register SPI flash slave and read JEDEC ID", test_spi_flash_id},

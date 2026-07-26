@@ -7,6 +7,7 @@
 #include "shared/pup_app_memory.h"
 #include "shared/pup_driver_abi.h"
 #include "shared/pup_channel_abi.h"
+#include "shared/pup_dtm.h"
 #include "pup_channel.h"
 #include "dev_irq.h"
 
@@ -61,6 +62,7 @@
 #define SYS_USERFS_MOUNT      40
 #define SYS_USERFS_UNMOUNT    41
 #define SYS_USERFS_MKFS       42
+#define SYS_DTM_QUERY         43
 
 typedef long (*syscall_func_t)(long arg1, long arg2, long arg3, long arg4);
 

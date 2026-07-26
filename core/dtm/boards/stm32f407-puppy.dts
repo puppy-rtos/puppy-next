@@ -1,0 +1,255 @@
+/dts-v1/;
+
+/ {
+    compatible = "puppy,stm32f407", "st,stm32f407";
+    model = "Puppy STM32F407";
+    #address-cells = <1>;
+    #size-cells = <1>;
+    interrupt-parent = <&nvic>;
+
+    aliases {
+        serial0 = &usart1;
+        gpio0 = &gpio0;
+        led0 = &led0;
+        key0 = &key0;
+        spi2 = &spi2;
+        flash0 = &flash0;
+    };
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+    };
+
+    nvic: interrupt-controller@e000e100 {
+        compatible = "arm,armv7m-nvic";
+        reg = <0xe000e100 0xc00>;
+        interrupt-controller;
+        #interrupt-cells = <1>;
+    };
+
+    gpio_devices: gpio-devices {
+        compatible = "puppy,gpio-devices";
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        gpio0: gpio@0 {
+            compatible = "puppy,gpio-dev";
+            reg = <0>;
+            puppy,dev-name = "gpio0";
+            puppy,device-id = <0>;
+            puppy,direction = "out";
+            gpios = <&gpioa 0 0>;
+            status = "okay";
+        };
+
+        led0: led@1 {
+            compatible = "puppy,gpio-led";
+            reg = <1>;
+            puppy,dev-name = "led0";
+            puppy,device-id = <1>;
+            puppy,direction = "out";
+            gpios = <&gpiof 11 0>;
+            status = "okay";
+        };
+
+        key0: key@2 {
+            compatible = "puppy,gpio-key";
+            reg = <2>;
+            puppy,dev-name = "key0";
+            puppy,device-id = <2>;
+            puppy,direction = "in";
+            gpios = <&gpioc 5 0>;
+            bias-pull-up;
+            interrupts = <23>;
+            puppy,exti-line = <5>;
+            puppy,exti-port = <2>;
+            puppy,irq-priority = <2>;
+            status = "okay";
+        };
+    };
+
+    pinctrl {
+        compatible = "puppy,pinctrl-arm-m4-st-gd";
+
+        usart1_pins: usart1-pins {
+            puppy,pins = <
+                0x40020000 9  7
+                0x40020000 10 7
+            >;
+        };
+
+        spi2_pins: spi2-pins {
+            puppy,pins = <
+                0x40020800 2  5
+                0x40020800 3  5
+                0x40020400 13 5
+            >;
+        };
+    };
+
+    soc {
+        compatible = "simple-bus";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+
+        rcc: clock-controller@40023800 {
+            compatible = "puppy,clk-arm-m4-st-gd", "st,stm32f4-rcc";
+            reg = <0x40023800 0x400>;
+            #clock-cells = <1>;
+            hse-frequency = <8000000>;
+            clock-frequency = <168000000>;
+            puppy,pll = <8 336 2 7>;
+            puppy,bus-dividers = <1 4 2>;
+            status = "okay";
+
+            gpioa_clk: gpioa-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <12>;
+                puppy,parent-clock = <7>;
+                puppy,enable-reg = <0x30>;
+                puppy,enable-bit = <0>;
+                status = "okay";
+            };
+
+            gpiob_clk: gpiob-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <13>;
+                puppy,parent-clock = <7>;
+                puppy,enable-reg = <0x30>;
+                puppy,enable-bit = <1>;
+                status = "okay";
+            };
+
+            gpioc_clk: gpioc-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <14>;
+                puppy,parent-clock = <7>;
+                puppy,enable-reg = <0x30>;
+                puppy,enable-bit = <2>;
+                status = "okay";
+            };
+
+            gpiof_clk: gpiof-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <17>;
+                puppy,parent-clock = <7>;
+                puppy,enable-reg = <0x30>;
+                puppy,enable-bit = <5>;
+                status = "okay";
+            };
+
+            usart1_clk: usart1-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <21>;
+                puppy,parent-clock = <9>;
+                puppy,enable-reg = <0x44>;
+                puppy,enable-bit = <4>;
+                status = "okay";
+            };
+
+            spi2_clk: spi2-clock {
+                compatible = "puppy,clock-gate";
+                #clock-cells = <0>;
+                puppy,clock-id = <44>;
+                puppy,parent-clock = <8>;
+                puppy,enable-reg = <0x40>;
+                puppy,enable-bit = <14>;
+                status = "okay";
+            };
+        };
+
+        syscfg: syscfg@40013800 {
+            compatible = "st,stm32-syscfg";
+            reg = <0x40013800 0x400>;
+            status = "okay";
+        };
+
+        exti: interrupt-controller@40013c00 {
+            compatible = "st,stm32-exti";
+            reg = <0x40013c00 0x400>;
+            interrupt-controller;
+            #interrupt-cells = <1>;
+            puppy,priority = <2>;
+            status = "okay";
+        };
+
+        gpioa: gpio@40020000 {
+            compatible = "puppy,gpio-arm-m4-st-gd", "st,stm32-gpio";
+            reg = <0x40020000 0x400>;
+            gpio-controller;
+            #gpio-cells = <2>;
+            clocks = <&gpioa_clk>;
+            status = "okay";
+        };
+
+        gpiob: gpio@40020400 {
+            compatible = "puppy,gpio-arm-m4-st-gd", "st,stm32-gpio";
+            reg = <0x40020400 0x400>;
+            gpio-controller;
+            #gpio-cells = <2>;
+            clocks = <&gpiob_clk>;
+            status = "okay";
+        };
+
+        gpioc: gpio@40020800 {
+            compatible = "puppy,gpio-arm-m4-st-gd", "st,stm32-gpio";
+            reg = <0x40020800 0x400>;
+            gpio-controller;
+            #gpio-cells = <2>;
+            clocks = <&gpioc_clk>;
+            status = "okay";
+        };
+
+        gpiof: gpio@40021400 {
+            compatible = "puppy,gpio-arm-m4-st-gd", "st,stm32-gpio";
+            reg = <0x40021400 0x400>;
+            gpio-controller;
+            #gpio-cells = <2>;
+            clocks = <&gpiof_clk>;
+            status = "okay";
+        };
+
+        usart1: serial@40011000 {
+            compatible = "puppy,uart-arm-m4-st-gd", "st,stm32-uart";
+            reg = <0x40011000 0x400>;
+            interrupts = <37>;
+            clocks = <&usart1_clk>;
+            current-speed = <115200>;
+            pinctrl-0 = <&usart1_pins>;
+            pinctrl-names = "default";
+            status = "okay";
+        };
+
+        spi2: spi@40003800 {
+            compatible = "puppy,spi-arm-m4-st-gd", "st,stm32-spi";
+            reg = <0x40003800 0x400>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            puppy,dev-name = "spi2";
+            puppy,device-id = <3>;
+            clocks = <&spi2_clk>;
+            pinctrl-0 = <&spi2_pins>;
+            pinctrl-names = "default";
+            cs-gpios = <&gpiob 12 0>;
+            puppy,spi-mode = <0>;
+            puppy,baudrate-prescaler = <7>;
+            status = "okay";
+
+            flash0: flash@0 {
+                compatible = "jedec,spi-nor";
+                reg = <0>;
+                puppy,dev-name = "flash0";
+                puppy,device-id = <4>;
+                spi-max-frequency = <12000000>;
+                puppy,baudrate-prescaler = <2>;
+                status = "okay";
+            };
+        };
+    };
+};

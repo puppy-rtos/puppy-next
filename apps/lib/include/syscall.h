@@ -8,6 +8,7 @@
 #include "shared/pup_user_thread.h"
 #include "shared/pup_channel_abi.h"
 #include "shared/pup_devfs_proto.h"
+#include "shared/pup_dtm.h"
 
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
@@ -58,6 +59,8 @@
 #define SYS_USERFS_UNREGISTER 39
 #define SYS_USERFS_MOUNT      40
 #define SYS_USERFS_UNMOUNT    41
+#define SYS_USERFS_MKFS       42
+#define SYS_DTM_QUERY         43
 
 /* STM32F407 NVIC external IRQ numbers used by user-mode drivers */
 #define PUP_IRQ_EXTI9_5      23
@@ -285,10 +288,12 @@ static inline int userfs_unmount(const char *mount_path) {
     return (int)syscall(SYS_USERFS_UNMOUNT, (long)mount_path, 0, 0, 0);
 }
 
-#define SYS_USERFS_MKFS         42
-
 static inline int userfs_mkfs(const char *fs_type, const char *device) {
     return (int)syscall(SYS_USERFS_MKFS, (long)fs_type, (long)device, 0, 0);
+}
+
+static inline int dtm_query(int query, void *buffer, unsigned int size) {
+    return (int)syscall(SYS_DTM_QUERY, query, (long)buffer, size, 0);
 }
 
 #endif
